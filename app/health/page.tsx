@@ -17,9 +17,9 @@ async function checkSupabaseConnection() {
 
   try {
     const supabase = createSupabaseClient();
-    const { error } = await supabase.from("_mnelo_health_check").select("*").limit(1);
+    const { error } = await supabase.auth.getSession();
 
-    if (!error || error.code === "42P01") {
+    if (!error) {
       return {
         isConnected: true,
         errorMessage: "",
