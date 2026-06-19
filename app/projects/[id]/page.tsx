@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { AppNav } from "@/components/app-nav";
 import { Badge, Button, Shell, StatCard } from "@/components/ui";
 import { BoqResultsTable } from "@/components/boq-results-table";
-import { getProject } from "@/lib/data";
+import { getProjectForCurrentUser } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +12,7 @@ export default async function ProjectDetailsPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const project = getProject(id);
+  const project = await getProjectForCurrentUser(id);
 
   if (!project) {
     notFound();
