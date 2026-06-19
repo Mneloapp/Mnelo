@@ -1,13 +1,13 @@
 import Link from "next/link";
-import { login } from "@/app/auth/actions";
+import { signup } from "@/app/auth/actions";
 import { Logo } from "@/components/ui";
 
-export default async function LoginPage({
+export default async function SignupPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; message?: string; next?: string }>;
+  searchParams: Promise<{ error?: string }>;
 }) {
-  const { error, message, next } = await searchParams;
+  const { error } = await searchParams;
 
   return (
     <main className="grid min-h-screen place-items-center px-4 py-10">
@@ -16,9 +16,9 @@ export default async function LoginPage({
           <Logo />
         </div>
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight text-ink">Welcome back</h1>
+          <h1 className="text-3xl font-semibold tracking-tight text-ink">Create your account</h1>
           <p className="mt-2 text-sm text-ink/55">
-            Sign in to continue estimating, validating, and procuring MEP scopes with Mnelo.
+            Start your Mnelo workspace for AI-assisted MEP estimation and procurement.
           </p>
         </div>
 
@@ -28,14 +28,7 @@ export default async function LoginPage({
           </div>
         ) : null}
 
-        {message ? (
-          <div className="mt-5 rounded-lg border border-leaf-200 bg-leaf-50 px-4 py-3 text-sm text-leaf-800">
-            {message}
-          </div>
-        ) : null}
-
-        <form action={login} className="mt-8 space-y-4">
-          <input name="next" type="hidden" value={next ?? "/dashboard"} />
+        <form action={signup} className="mt-8 space-y-4">
           <label className="block">
             <span className="text-sm font-medium text-ink/70">Email</span>
             <input
@@ -57,27 +50,18 @@ export default async function LoginPage({
               type="password"
             />
           </label>
-          <div className="flex items-center justify-between text-sm">
-            <label className="flex items-center gap-2 text-ink/55">
-              <input className="h-4 w-4 rounded border-line text-leaf-600 focus:ring-leaf-500" type="checkbox" />
-              Remember me
-            </label>
-            <a className="font-medium text-leaf-700 hover:text-leaf-800" href="#">
-              Reset password
-            </a>
-          </div>
           <button
             className="inline-flex h-10 w-full items-center justify-center rounded-lg bg-ink px-4 text-sm font-semibold text-white shadow-soft transition hover:bg-leaf-900"
             type="submit"
           >
-            Sign in
+            Create account
           </button>
         </form>
 
         <p className="mt-6 text-center text-sm text-ink/55">
-          New to Mnelo?{" "}
-          <Link className="font-semibold text-leaf-700 hover:text-leaf-800" href="/signup">
-            Create an account
+          Already have an account?{" "}
+          <Link className="font-semibold text-leaf-700 hover:text-leaf-800" href="/login">
+            Sign in
           </Link>
         </p>
       </section>

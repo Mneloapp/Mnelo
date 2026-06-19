@@ -1,4 +1,5 @@
-import { AppNav, Badge, Button, Shell } from "@/components/ui";
+import { AppNav } from "@/components/app-nav";
+import { Badge, Button, Shell } from "@/components/ui";
 import { ProjectCard } from "@/components/project-card";
 import { projects } from "@/lib/data";
 

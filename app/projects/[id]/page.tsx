@@ -1,11 +1,10 @@
 import { notFound } from "next/navigation";
-import { AppNav, Badge, Button, Shell, StatCard } from "@/components/ui";
+import { AppNav } from "@/components/app-nav";
+import { Badge, Button, Shell, StatCard } from "@/components/ui";
 import { BoqResultsTable } from "@/components/boq-results-table";
-import { getProject, projects } from "@/lib/data";
+import { getProject } from "@/lib/data";
 
-export function generateStaticParams() {
-  return projects.map((project) => ({ id: project.id }));
-}
+export const dynamic = "force-dynamic";
 
 export default async function ProjectDetailsPage({
   params,

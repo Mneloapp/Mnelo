@@ -63,28 +63,6 @@ export function Shell({ children }: { children: React.ReactNode }) {
   return <main className="mx-auto min-h-screen w-full max-w-7xl px-4 py-5 sm:px-6 lg:px-8">{children}</main>;
 }
 
-export function AppNav() {
-  return (
-    <div className="mb-6 flex items-center justify-between rounded-xl border border-line bg-white/80 px-4 py-3 backdrop-blur">
-      <Logo />
-      <nav className="hidden items-center gap-6 text-sm font-medium text-ink/60 md:flex">
-        <Link className="hover:text-ink" href="/dashboard">
-          Dashboard
-        </Link>
-        <Link className="hover:text-ink" href="/projects">
-          Projects
-        </Link>
-        <Link className="hover:text-ink" href="/login">
-          Login
-        </Link>
-      </nav>
-      <Button href="/projects" className="hidden sm:inline-flex">
-        Open workspace
-      </Button>
-    </div>
-  );
-}
-
 export function StatCard({
   label,
   value,

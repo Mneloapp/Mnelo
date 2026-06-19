@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { AppNav, Badge, Shell, StatCard } from "@/components/ui";
+import { AppNav } from "@/components/app-nav";
+import { Badge, Shell, StatCard } from "@/components/ui";
 import { ProjectCard } from "@/components/project-card";
 import { projects } from "@/lib/data";
 
