@@ -83,7 +83,7 @@ export default async function ProjectsPage({
             <input
               className="mt-2 h-11 w-full rounded-lg border border-line bg-white px-3 text-sm outline-none transition placeholder:text-ink/30 focus:border-leaf-400 focus:ring-4 focus:ring-leaf-100"
               min="0"
-              name="contractValue"
+              name="contract_value"
               placeholder="4800000"
               step="1000"
               type="number"

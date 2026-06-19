@@ -24,7 +24,7 @@ export async function createProject(formData: FormData) {
   const client = readString(formData, "client");
   const location = readString(formData, "location");
   const trade = readString(formData, "trade") || "MEP";
-  const contractValue = readNumber(formData, "contractValue");
+  const contractValue = readNumber(formData, "contract_value");
   const statusValue = readString(formData, "status");
   const riskValue = readString(formData, "risk");
   const status = projectStatuses.includes(statusValue as ProjectStatus)
