@@ -46,6 +46,16 @@ export type Project = {
   boq: BoqItem[];
 };
 
+export type ProjectsQueryResult = {
+  projects: Project[];
+  errorMessage: string | null;
+};
+
+export type ProjectQueryResult = {
+  project: Project | null;
+  errorMessage: string | null;
+};
+
 const sampleBoq: BoqItem[] = [
   {
     id: "M-104",
@@ -147,7 +157,10 @@ export async function getProjectsForCurrentUser() {
   const userId = await getAuthenticatedUserId();
 
   if (!userId) {
-    return [];
+    return {
+      projects: [],
+      errorMessage: null,
+    } satisfies ProjectsQueryResult;
   }
 
   const supabase = await createSupabaseServerClient();
@@ -158,17 +171,26 @@ export async function getProjectsForCurrentUser() {
     .order("updated_at", { ascending: false });
 
   if (error) {
-    throw new Error(error.message);
+    return {
+      projects: [],
+      errorMessage: error.message,
+    } satisfies ProjectsQueryResult;
   }
 
-  return (data as ProjectRow[]).map(mapProject);
+  return {
+    projects: (data as ProjectRow[]).map(mapProject),
+    errorMessage: null,
+  } satisfies ProjectsQueryResult;
 }
 
 export async function getProjectForCurrentUser(id: string) {
   const userId = await getAuthenticatedUserId();
 
   if (!userId) {
-    return null;
+    return {
+      project: null,
+      errorMessage: null,
+    } satisfies ProjectQueryResult;
   }
 
   const supabase = await createSupabaseServerClient();
@@ -180,8 +202,14 @@ export async function getProjectForCurrentUser(id: string) {
     .maybeSingle();
 
   if (error) {
-    throw new Error(error.message);
+    return {
+      project: null,
+      errorMessage: error.message,
+    } satisfies ProjectQueryResult;
   }
 
-  return data ? mapProject(data as ProjectRow) : null;
+  return {
+    project: data ? mapProject(data as ProjectRow) : null,
+    errorMessage: null,
+  } satisfies ProjectQueryResult;
 }

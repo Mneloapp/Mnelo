@@ -5,7 +5,8 @@ import { ProjectCard } from "@/components/project-card";
 import { formatCurrency, getProjectsForCurrentUser } from "@/lib/data";
 
 export default async function DashboardPage() {
-  const projects = await getProjectsForCurrentUser();
+  const { projects, errorMessage } = await getProjectsForCurrentUser();
+  const showProjectError = process.env.NODE_ENV === "development" && errorMessage;
   const pipelineValue = projects.reduce((total, project) => total + project.contractValue, 0);
   const drawingsProcessed = projects.reduce((total, project) => total + project.drawings, 0);
   const averageReadiness =
@@ -65,6 +66,11 @@ export default async function DashboardPage() {
                 <p className="mt-2 text-sm leading-6 text-ink/58">
                   Create a project to begin building your user-scoped Supabase pipeline.
                 </p>
+                {showProjectError ? (
+                  <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 font-mono text-xs text-red-800">
+                    {errorMessage}
+                  </p>
+                ) : null}
                 <div className="mt-5">
                   <Button href="/projects#create-project">Create Project</Button>
                 </div>

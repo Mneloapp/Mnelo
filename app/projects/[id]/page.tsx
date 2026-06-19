@@ -12,9 +12,34 @@ export default async function ProjectDetailsPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const project = await getProjectForCurrentUser(id);
+  const { project, errorMessage } = await getProjectForCurrentUser(id);
 
   if (!project) {
+    if (errorMessage) {
+      return (
+        <Shell>
+          <AppNav />
+          <section className="rounded-2xl border border-line bg-white p-8 text-center shadow-sm">
+            <Badge tone="neutral">Project unavailable</Badge>
+            <h1 className="mt-4 text-3xl font-semibold tracking-tight text-ink">
+              We could not load this project.
+            </h1>
+            <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-ink/58">
+              The projects table may not be set up yet. Create the table in Supabase, then refresh this page.
+            </p>
+            {process.env.NODE_ENV === "development" ? (
+              <p className="mx-auto mt-5 max-w-2xl rounded-lg border border-red-200 bg-red-50 px-3 py-2 font-mono text-xs text-red-800">
+                {errorMessage}
+              </p>
+            ) : null}
+            <div className="mt-6">
+              <Button href="/projects">Back to projects</Button>
+            </div>
+          </section>
+        </Shell>
+      );
+    }
+
     notFound();
   }
 

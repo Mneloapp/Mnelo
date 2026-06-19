@@ -9,7 +9,9 @@ export default async function ProjectsPage({
 }: {
   searchParams: Promise<{ error?: string }>;
 }) {
-  const [{ error }, projects] = await Promise.all([searchParams, getProjectsForCurrentUser()]);
+  const [{ error }, projectResult] = await Promise.all([searchParams, getProjectsForCurrentUser()]);
+  const { projects, errorMessage } = projectResult;
+  const showProjectError = process.env.NODE_ENV === "development" && errorMessage;
 
   return (
     <Shell>
@@ -134,6 +136,11 @@ export default async function ProjectsPage({
             <p className="mx-auto mt-3 max-w-lg text-sm leading-6 text-ink/58">
               Projects you create are stored in Supabase and scoped to your logged-in user account.
             </p>
+            {showProjectError ? (
+              <p className="mx-auto mt-4 max-w-2xl rounded-lg border border-red-200 bg-red-50 px-3 py-2 font-mono text-xs text-red-800">
+                {errorMessage}
+              </p>
+            ) : null}
             <a
               className="mt-6 inline-flex h-10 items-center justify-center rounded-lg bg-ink px-4 text-sm font-semibold text-white shadow-soft transition hover:bg-leaf-900"
               href="#create-project"
