@@ -132,6 +132,8 @@ type ClassificationPrediction = {
   confidence_score: number;
 };
 
+type BoqFileColumnMode = "both" | "project_file_id" | "source_file_id" | "none";
+
 export type ProjectDocumentActionResult = {
   ok: boolean;
   message?: string;
@@ -435,18 +437,15 @@ async function saveParsedBoqRows({
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
   userId: string;
 }) {
-  const { error: boqError } = await supabase.from("boq_items").insert(
+  const buildBoqRows = (fileColumnMode: BoqFileColumnMode) =>
     rows.map((row) => {
       const prediction = predictClassification(row.description);
-
-      return {
+      const payload: Record<string, unknown> = {
         project_id: projectId,
-        project_file_id: projectFileId,
-        source_file_id: projectFileId,
         user_id: userId,
         description: row.description,
-        quantity: row.quantity,
-        unit: row.unit,
+        quantity: row.quantity ?? 0,
+        unit: row.unit || "",
         rate: row.rate,
         amount: row.amount,
         category: prediction.predicted_category,
@@ -455,11 +454,42 @@ async function saveParsedBoqRows({
         sheet_name: row.sheet_name,
         row_number: row.row_number,
       };
-    }),
-  );
 
-  if (boqError) {
-    return boqError.message;
+      if (fileColumnMode === "both" || fileColumnMode === "project_file_id") {
+        payload.project_file_id = projectFileId;
+      }
+
+      if (fileColumnMode === "both" || fileColumnMode === "source_file_id") {
+        payload.source_file_id = projectFileId;
+      }
+
+      return payload;
+    });
+
+  const insertAttempts: BoqFileColumnMode[] = ["both", "source_file_id", "project_file_id", "none"];
+  let boqInsertError: string | null = null;
+
+  for (const fileColumnMode of insertAttempts) {
+    const { error: boqError } = await supabase.from("boq_items").insert(buildBoqRows(fileColumnMode));
+
+    if (!boqError) {
+      boqInsertError = null;
+      break;
+    }
+
+    boqInsertError = boqError.message;
+    const canRetrySchemaFallback =
+      boqError.message.includes("schema cache") ||
+      boqError.message.includes("source_file_id") ||
+      boqError.message.includes("project_file_id");
+
+    if (!canRetrySchemaFallback) {
+      break;
+    }
+  }
+
+  if (boqInsertError) {
+    return boqInsertError;
   }
 
   const { error: learningError } = await supabase.from("ai_training_data").insert(
@@ -494,11 +524,56 @@ async function saveParsedBoqRows({
   );
 
   if (learningError) {
-    await supabase.from("boq_items").delete().eq("source_file_id", projectFileId).eq("user_id", userId);
-    return learningError.message;
+    console.error(`Failed creating ai_training_data records: ${learningError.message}`);
   }
 
   return null;
+}
+
+async function deleteParsedBoqRowsForFile({
+  projectFileId,
+  projectId,
+  supabase,
+  userId,
+}: {
+  projectFileId: string;
+  projectId: string;
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+  userId: string;
+}) {
+  const deleteAttempts = [
+    () =>
+      supabase
+        .from("boq_items")
+        .delete()
+        .eq("project_id", projectId)
+        .eq("user_id", userId)
+        .or(`source_file_id.eq.${projectFileId},project_file_id.eq.${projectFileId}`),
+    () =>
+      supabase
+        .from("boq_items")
+        .delete()
+        .eq("project_id", projectId)
+        .eq("user_id", userId)
+        .eq("source_file_id", projectFileId),
+    () =>
+      supabase
+        .from("boq_items")
+        .delete()
+        .eq("project_id", projectId)
+        .eq("user_id", userId)
+        .eq("project_file_id", projectFileId),
+  ];
+
+  for (const deleteAttempt of deleteAttempts) {
+    const { error } = await deleteAttempt();
+
+    if (!error) {
+      return;
+    }
+
+    console.error(`Failed deleting existing parsed BOQ rows before parse: ${error.message}`);
+  }
 }
 
 export async function createProject(formData: FormData) {
@@ -713,7 +788,12 @@ export async function saveBoqColumnMappingAndParse(formData: FormData) {
     return actionError(error, "Excel parsing failed with the selected mapping.");
   }
 
-  await supabase.from("boq_items").delete().eq("source_file_id", projectFileId).eq("user_id", user.id);
+  await deleteParsedBoqRowsForFile({
+    projectFileId,
+    projectId,
+    supabase,
+    userId: user.id,
+  });
 
   const saveError = await saveParsedBoqRows({
     projectFileId,
@@ -788,7 +868,12 @@ export async function parseExistingProjectFile(formData: FormData) {
     return actionError(error, "Excel parsing failed.");
   }
 
-  await supabase.from("boq_items").delete().eq("source_file_id", projectFileId).eq("user_id", user.id);
+  await deleteParsedBoqRowsForFile({
+    projectFileId,
+    projectId,
+    supabase,
+    userId: user.id,
+  });
 
   const saveError = await saveParsedBoqRows({
     projectFileId,
