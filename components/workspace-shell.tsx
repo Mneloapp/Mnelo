@@ -5,10 +5,10 @@ import { MneloLogo } from "@/components/MneloLogo";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 const sidebarItems = [
-  { label: "Projects", href: "/dashboard", icon: FolderKanban },
-  { label: "Files", href: "#documents", icon: Files },
-  { label: "BOQ", href: "#boq", icon: TableProperties },
-  { label: "Settings", href: "/health", icon: Settings },
+  { label: "Projects", href: "/projects", icon: FolderKanban },
+  { label: "Files", href: "/files", icon: Files },
+  { label: "BOQ", href: "/boq", icon: TableProperties },
+  { label: "Settings", href: "/settings", icon: Settings },
 ];
 
 async function getUserEmail() {

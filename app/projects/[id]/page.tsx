@@ -131,6 +131,63 @@ export default async function ProjectDetailsPage({
             <OverviewCard detail="Most recent document upload" label="Last upload" value={lastUpload} />
             <OverviewCard detail="Latest parsed BOQ row" label="Last parse" value={lastParse} />
           </div>
+
+          <div className="mt-6 grid gap-6 xl:grid-cols-2">
+            <div className="rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-[0_18px_50px_rgba(15,23,42,0.04)]">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-lg font-semibold tracking-tight text-[#07130f]">Recent files</h2>
+                <a className="text-sm font-semibold text-[#087a36]" href="#documents">
+                  View documents
+                </a>
+              </div>
+              {files.length > 0 ? (
+                <div className="mt-4 divide-y divide-[#edf0ed]">
+                  {files.slice(0, 4).map((file) => (
+                    <div className="flex items-center justify-between gap-4 py-3" key={file.id}>
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-[#0f172a]">{file.fileName}</p>
+                        <p className="mt-1 text-xs text-[#64748b]">
+                          {file.documentType} / {file.fileSize}
+                        </p>
+                      </div>
+                      <p className="whitespace-nowrap text-xs text-[#64748b]">{file.uploadedAt}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-4 rounded-xl border border-dashed border-[#e5e7eb] bg-[#f8faf8] p-6 text-center">
+                  <p className="font-medium text-[#0f172a]">No files uploaded yet</p>
+                  <p className="mt-2 text-sm text-[#64748b]">Upload documents in the Documents tab.</p>
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-[0_18px_50px_rgba(15,23,42,0.04)]">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-lg font-semibold tracking-tight text-[#07130f]">Latest BOQ rows</h2>
+                <a className="text-sm font-semibold text-[#087a36]" href="#boq">
+                  View BOQ
+                </a>
+              </div>
+              {boqItems.length > 0 ? (
+                <div className="mt-4 divide-y divide-[#edf0ed]">
+                  {boqItems.slice(0, 4).map((item) => (
+                    <div className="grid gap-2 py-3 sm:grid-cols-[1fr_auto]" key={item.id}>
+                      <p className="line-clamp-2 text-sm font-semibold text-[#0f172a]">{item.description}</p>
+                      <p className="whitespace-nowrap text-sm text-[#64748b]">
+                        {item.quantity === null ? "—" : item.quantity.toLocaleString()} {item.unit || ""}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-4 rounded-xl border border-dashed border-[#e5e7eb] bg-[#f8faf8] p-6 text-center">
+                  <p className="font-medium text-[#0f172a]">No BOQ items parsed yet</p>
+                  <p className="mt-2 text-sm text-[#64748b]">Upload or parse a BOQ file to get started.</p>
+                </div>
+              )}
+            </div>
+          </div>
         </section>
 
         <section

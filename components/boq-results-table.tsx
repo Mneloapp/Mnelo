@@ -154,9 +154,9 @@ export function BoqResultsTable({
         </div>
       ) : (
         <div className="p-8 text-center">
-          <p className="font-medium text-ink">No BOQ rows parsed yet</p>
+          <p className="font-medium text-ink">No BOQ items parsed yet</p>
           <p className="mt-2 text-sm text-ink/55">
-            Upload an Excel BOQ file with description, item, or name columns to populate this table.
+            Upload or parse a BOQ file to get started.
           </p>
         </div>
       )}

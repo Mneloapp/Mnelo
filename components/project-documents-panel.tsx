@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { FileSpreadsheet, RefreshCw, Trash2, UploadCloud } from "lucide-react";
 import {
   deleteProjectFile,
   parseExistingProjectFile,
@@ -134,7 +135,7 @@ export function ProjectDocumentsPanel({
           <span className="text-sm font-medium text-ink/70">Document file</span>
           <input
             accept=".xlsx,.xls,.pdf"
-            className="mt-2 block h-11 w-full rounded-lg border border-line bg-white px-3 py-2 text-sm file:mr-4 file:rounded-md file:border-0 file:bg-ink file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-white hover:file:bg-leaf-900 disabled:cursor-not-allowed disabled:opacity-55"
+            className="mt-2 block h-11 w-full rounded-xl border border-[#e5e7eb] bg-white px-3 py-2 text-sm file:mr-4 file:rounded-lg file:border-0 file:bg-[#ecfdf3] file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-[#087a36] hover:file:bg-[#dcfce7] disabled:cursor-not-allowed disabled:opacity-55"
             disabled={isUploading}
             name="file"
             required
@@ -144,7 +145,7 @@ export function ProjectDocumentsPanel({
         <label className="block">
           <span className="text-sm font-medium text-ink/70">Document type</span>
           <select
-            className="mt-2 h-11 w-full rounded-lg border border-line bg-white px-3 text-sm outline-none transition focus:border-leaf-400 focus:ring-4 focus:ring-leaf-100 disabled:cursor-not-allowed disabled:opacity-55"
+            className="mt-2 h-11 w-full rounded-xl border border-[#e5e7eb] bg-white px-3 text-sm outline-none transition focus:border-[#16a34a] focus:ring-4 focus:ring-[#dcfce7] disabled:cursor-not-allowed disabled:opacity-55"
             disabled={isUploading}
             name="document_type"
           >
@@ -156,10 +157,11 @@ export function ProjectDocumentsPanel({
         </label>
         <div className="flex items-end">
           <button
-            className="inline-flex h-11 w-full items-center justify-center rounded-lg bg-ink px-4 text-sm font-semibold text-white shadow-soft transition hover:bg-leaf-900 disabled:cursor-not-allowed disabled:opacity-60 lg:w-auto"
+            className="inline-flex h-11 w-full items-center justify-center rounded-xl bg-[#16a34a] px-4 text-sm font-semibold text-white shadow-[0_12px_28px_rgba(22,163,74,0.22)] transition hover:bg-[#087a36] disabled:cursor-not-allowed disabled:opacity-60 lg:w-auto"
             disabled={isUploading}
             type="submit"
           >
+            <UploadCloud aria-hidden="true" className="mr-2 h-4 w-4" strokeWidth={2} />
             {isUploading ? "Uploading..." : "Upload"}
           </button>
         </div>
@@ -234,14 +236,14 @@ export function ProjectDocumentsPanel({
           </div>
           <div className="mt-4 flex flex-col gap-2 sm:flex-row">
             <button
-              className="inline-flex h-10 items-center justify-center rounded-lg bg-ink px-4 text-sm font-semibold text-white shadow-soft transition hover:bg-leaf-900 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex h-10 items-center justify-center rounded-xl bg-[#16a34a] px-4 text-sm font-semibold text-white shadow-[0_12px_28px_rgba(22,163,74,0.18)] transition hover:bg-[#087a36] disabled:cursor-not-allowed disabled:opacity-60"
               disabled={isSavingMapping}
               type="submit"
             >
               {isSavingMapping ? "Saving mapping..." : "Save mapping and parse"}
             </button>
             <button
-              className="inline-flex h-10 items-center justify-center rounded-lg bg-white px-4 text-sm font-semibold text-ink ring-1 ring-amber-200 transition hover:bg-amber-100"
+              className="inline-flex h-10 items-center justify-center rounded-xl bg-white px-4 text-sm font-semibold text-ink ring-1 ring-amber-200 transition hover:bg-amber-100"
               disabled={isSavingMapping}
               onClick={() => setMappingRequest(null)}
               type="button"
@@ -287,7 +289,7 @@ export function ProjectDocumentsPanel({
                     <div className="flex flex-wrap items-start justify-start gap-2 md:justify-end">
                       {canParse ? (
                         <button
-                          className="inline-flex h-8 items-center justify-center rounded-md bg-white px-3 text-xs font-semibold text-leaf-700 ring-1 ring-leaf-200 transition hover:bg-leaf-50 disabled:cursor-not-allowed disabled:opacity-60"
+                          className="inline-flex h-8 items-center justify-center rounded-lg bg-white px-3 text-xs font-semibold text-[#087a36] ring-1 ring-[#bbf7d0] transition hover:bg-[#ecfdf3] disabled:cursor-not-allowed disabled:opacity-60"
                           disabled={Boolean(deletingFileId || parsingFileId)}
                           onClick={async () => {
                             setParsingFileId(file.id);
@@ -327,12 +329,17 @@ export function ProjectDocumentsPanel({
                           }}
                           type="button"
                         >
+                          {hasParsedBoq ? (
+                            <RefreshCw aria-hidden="true" className="mr-2 h-3.5 w-3.5" strokeWidth={2} />
+                          ) : (
+                            <FileSpreadsheet aria-hidden="true" className="mr-2 h-3.5 w-3.5" strokeWidth={2} />
+                          )}
                           {isParsing ? "Parsing..." : hasParsedBoq ? "Re-parse" : "Parse"}
                         </button>
                       ) : null}
                       <button
                         aria-label={`Delete ${file.fileName}`}
-                        className="inline-flex h-8 items-center justify-center rounded-md bg-white px-3 text-xs font-semibold text-red-700 ring-1 ring-red-200 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        className="inline-flex h-8 items-center justify-center rounded-lg bg-white px-3 text-xs font-semibold text-red-700 ring-1 ring-red-200 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
                         disabled={Boolean(deletingFileId)}
                         onClick={async () => {
                           if (hasParsedBoq && !window.confirm("Delete file and all parsed BOQ data?")) {
@@ -367,6 +374,7 @@ export function ProjectDocumentsPanel({
                         }}
                         type="button"
                       >
+                        <Trash2 aria-hidden="true" className="mr-2 h-3.5 w-3.5" strokeWidth={2} />
                         {isDeleting ? "Deleting..." : "Delete"}
                       </button>
                     </div>

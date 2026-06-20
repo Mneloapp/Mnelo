@@ -1,149 +1,165 @@
-import { AppNav } from "@/components/app-nav";
-import { Badge, Shell, StatCard } from "@/components/ui";
+import { Brain, CheckCircle2, type LucideIcon, Tags } from "lucide-react";
+import { EmptyState, ErrorMessage, PageHeader } from "@/components/ui";
+import { WorkspaceShell } from "@/components/workspace-shell";
 import { getLearningSummaryForCurrentUser } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
+
+function LearningStat({ detail, icon: Icon, label, value }: {
+  detail: string;
+  icon: LucideIcon;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-[0_18px_50px_rgba(15,23,42,0.04)]">
+      <div className="flex items-start gap-4">
+        <div className="grid h-11 w-11 place-items-center rounded-xl bg-[#ecfdf3] text-[#16a34a]">
+          <Icon aria-hidden="true" className="h-6 w-6" strokeWidth={2} />
+        </div>
+        <div>
+          <p className="text-sm font-medium text-[#64748b]">{label}</p>
+          <p className="mt-2 text-3xl font-semibold tracking-tight text-[#0f172a]">{value}</p>
+          <p className="mt-3 text-xs font-medium text-[#64748b]">{detail}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default async function LearningPage() {
   const summary = await getLearningSummaryForCurrentUser();
   const showLearningError = process.env.NODE_ENV === "development" && summary.errorMessage;
 
   return (
-    <Shell>
-      <AppNav />
-      <section className="mb-6 rounded-2xl border border-line bg-white p-6 shadow-sm">
-        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-          <div>
-            <Badge>Learning engine</Badge>
-            <h1 className="mt-4 text-4xl font-semibold tracking-tight text-ink">Training Data</h1>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-ink/58">
-              Review how Mnelo classifies BOQ items, tracks user corrections, and builds category history across
-              industries without overwriting previous predictions.
-            </p>
+    <WorkspaceShell active="BOQ">
+      <div className="mx-auto max-w-[1440px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+        <PageHeader
+          eyebrow="Learning engine"
+          subtitle="Review industry-agnostic BOQ classifications, user corrections, and training history without overwriting previous predictions."
+          title="Training Data"
+        />
+
+        <section className="mt-8 grid gap-4 md:grid-cols-3">
+          <LearningStat
+            detail="Predictions and corrections"
+            icon={Brain}
+            label="Training records"
+            value={String(summary.totalRecords)}
+          />
+          <LearningStat
+            detail="User-corrected history"
+            icon={CheckCircle2}
+            label="Correction rate"
+            value={`${summary.correctionRate}%`}
+          />
+          <LearningStat
+            detail="From parsed BOQ items"
+            icon={Tags}
+            label="Active categories"
+            value={String(summary.mostCommonCategories.length)}
+          />
+        </section>
+
+        {showLearningError ? (
+          <div className="mt-5">
+            <ErrorMessage message={summary.errorMessage} />
           </div>
-          <Badge tone="neutral">Industry-agnostic</Badge>
-        </div>
-      </section>
+        ) : null}
 
-      <section className="grid gap-4 md:grid-cols-3">
-        <StatCard
-          label="Training records"
-          value={String(summary.totalRecords)}
-          detail="Predictions and corrections"
-        />
-        <StatCard label="Correction rate" value={`${summary.correctionRate}%`} detail="User-corrected history" />
-        <StatCard
-          label="Active categories"
-          value={String(summary.mostCommonCategories.length)}
-          detail="From parsed BOQ items"
-        />
-      </section>
-
-      {showLearningError ? (
-        <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 font-mono text-xs text-red-800">
-          {summary.errorMessage}
-        </p>
-      ) : null}
-
-      <section className="mt-6 grid gap-6 lg:grid-cols-2">
-        <div className="rounded-xl border border-line bg-white p-5 shadow-sm">
-          <h2 className="text-lg font-semibold tracking-tight text-ink">Most common categories</h2>
-          {summary.mostCommonCategories.length > 0 ? (
-            <div className="mt-4 space-y-3">
-              {summary.mostCommonCategories.map((item) => (
-                <div
-                  className="flex items-center justify-between rounded-lg border border-line bg-mist/40 px-4 py-3"
-                  key={item.category}
-                >
-                  <span className="font-medium text-ink">{item.category}</span>
-                  <span className="text-sm text-ink/55">{item.count} records</span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="mt-4 rounded-xl border border-dashed border-line bg-mist/50 p-6 text-center">
-              <p className="font-medium text-ink">No categories yet</p>
-              <p className="mt-2 text-sm text-ink/55">
-                Upload an Excel BOQ to create the first learning records.
-              </p>
-            </div>
-          )}
-        </div>
-
-        <div className="rounded-xl border border-line bg-white p-5 shadow-sm">
-          <h2 className="text-lg font-semibold tracking-tight text-ink">Most corrected classifications</h2>
-          {summary.mostCorrectedClassifications.length > 0 ? (
-            <div className="mt-4 space-y-3">
-              {summary.mostCorrectedClassifications.map((item) => (
-                <div
-                  className="rounded-lg border border-line bg-mist/40 px-4 py-3"
-                  key={`${item.from}-${item.to}`}
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="font-medium text-ink">
-                      {item.from} <span className="text-ink/35">to</span> {item.to}
-                    </p>
-                    <span className="text-sm text-ink/55">{item.count} corrections</span>
+        <section className="mt-6 grid gap-6 lg:grid-cols-2">
+          <div className="rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-[0_18px_50px_rgba(15,23,42,0.04)]">
+            <h2 className="text-lg font-semibold tracking-tight text-[#0f172a]">Most common categories</h2>
+            {summary.mostCommonCategories.length > 0 ? (
+              <div className="mt-4 space-y-3">
+                {summary.mostCommonCategories.map((item) => (
+                  <div
+                    className="flex items-center justify-between rounded-xl border border-[#e5e7eb] bg-[#f8faf8] px-4 py-3"
+                    key={item.category}
+                  >
+                    <span className="font-medium text-[#0f172a]">{item.category}</span>
+                    <span className="text-sm text-[#64748b]">{item.count} records</span>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
+            ) : (
+              <EmptyState
+                description="Upload an Excel BOQ to create the first learning records."
+                title="No categories yet"
+              />
+            )}
+          </div>
+
+          <div className="rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-[0_18px_50px_rgba(15,23,42,0.04)]">
+            <h2 className="text-lg font-semibold tracking-tight text-[#0f172a]">Most corrected classifications</h2>
+            {summary.mostCorrectedClassifications.length > 0 ? (
+              <div className="mt-4 space-y-3">
+                {summary.mostCorrectedClassifications.map((item) => (
+                  <div className="rounded-xl border border-[#e5e7eb] bg-[#f8faf8] px-4 py-3" key={`${item.from}-${item.to}`}>
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="font-medium text-[#0f172a]">
+                        {item.from} <span className="text-[#94a3b8]">to</span> {item.to}
+                      </p>
+                      <span className="text-sm text-[#64748b]">{item.count} corrections</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <EmptyState
+                description="Corrections saved from BOQ rows will appear here as full history."
+                title="No corrections yet"
+              />
+            )}
+          </div>
+        </section>
+
+        <section className="mt-6 overflow-hidden rounded-2xl border border-[#e5e7eb] bg-white shadow-[0_18px_50px_rgba(15,23,42,0.04)]">
+          <div className="border-b border-[#e5e7eb] px-5 py-4">
+            <h2 className="text-lg font-semibold tracking-tight text-[#0f172a]">Recent training records</h2>
+            <p className="text-sm text-[#64748b]">Original predictions and user-corrected final values.</p>
+          </div>
+          {summary.recentRecords.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-left text-sm">
+                <thead className="bg-[#fbfdfb] text-xs uppercase tracking-[0.12em] text-[#64748b]">
+                  <tr>
+                    <th className="px-5 py-4 font-semibold">Item</th>
+                    <th className="px-5 py-4 font-semibold">Predicted</th>
+                    <th className="px-5 py-4 font-semibold">Final</th>
+                    <th className="px-5 py-4 font-semibold">Supplier type</th>
+                    <th className="px-5 py-4 text-right font-semibold">Confidence</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#edf0ed] bg-white">
+                  {summary.recentRecords.map((record) => (
+                    <tr className="transition hover:bg-[#f8faf8]" key={record.id}>
+                      <td className="min-w-80 px-5 py-4 font-medium text-[#0f172a]">{record.itemDescription}</td>
+                      <td className="whitespace-nowrap px-5 py-4 text-[#64748b]">
+                        {record.predictedCategory} / {record.predictedSubcategory}
+                      </td>
+                      <td className="whitespace-nowrap px-5 py-4 text-[#64748b]">
+                        {record.finalCategory} / {record.finalSubcategory}
+                      </td>
+                      <td className="whitespace-nowrap px-5 py-4 text-[#64748b]">{record.predictedSupplierType}</td>
+                      <td className="whitespace-nowrap px-5 py-4 text-right text-[#64748b]">
+                        {Math.round(record.confidenceScore * 100)}%
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           ) : (
-            <div className="mt-4 rounded-xl border border-dashed border-line bg-mist/50 p-6 text-center">
-              <p className="font-medium text-ink">No corrections yet</p>
-              <p className="mt-2 text-sm text-ink/55">
-                Corrections saved from BOQ rows will appear here as full history.
-              </p>
+            <div className="p-5">
+              <EmptyState
+                description="Every parsed BOQ item will create a learning record automatically."
+                title="No training records yet"
+              />
             </div>
           )}
-        </div>
-      </section>
-
-      <section className="mt-6 overflow-hidden rounded-xl border border-line bg-white shadow-sm">
-        <div className="border-b border-line px-5 py-4">
-          <h2 className="text-lg font-semibold tracking-tight text-ink">Recent training records</h2>
-          <p className="text-sm text-ink/55">Original predictions and user-corrected final values.</p>
-        </div>
-        {summary.recentRecords.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-line text-left text-sm">
-              <thead className="bg-mist/70 text-xs uppercase tracking-wide text-ink/45">
-                <tr>
-                  <th className="px-5 py-3 font-semibold">Item</th>
-                  <th className="px-5 py-3 font-semibold">Predicted</th>
-                  <th className="px-5 py-3 font-semibold">Final</th>
-                  <th className="px-5 py-3 font-semibold">Supplier type</th>
-                  <th className="px-5 py-3 text-right font-semibold">Confidence</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-line bg-white">
-                {summary.recentRecords.map((record) => (
-                  <tr key={record.id}>
-                    <td className="min-w-80 px-5 py-4 font-medium text-ink">{record.itemDescription}</td>
-                    <td className="whitespace-nowrap px-5 py-4 text-ink/65">
-                      {record.predictedCategory} / {record.predictedSubcategory}
-                    </td>
-                    <td className="whitespace-nowrap px-5 py-4 text-ink/65">
-                      {record.finalCategory} / {record.finalSubcategory}
-                    </td>
-                    <td className="whitespace-nowrap px-5 py-4 text-ink/55">{record.predictedSupplierType}</td>
-                    <td className="whitespace-nowrap px-5 py-4 text-right text-ink/55">
-                      {Math.round(record.confidenceScore * 100)}%
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="p-8 text-center">
-            <p className="font-medium text-ink">No training records yet</p>
-            <p className="mt-2 text-sm text-ink/55">
-              Every parsed BOQ item will create a learning record automatically.
-            </p>
-          </div>
-        )}
-      </section>
-    </Shell>
+        </section>
+      </div>
+    </WorkspaceShell>
   );
 }

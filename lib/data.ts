@@ -190,6 +190,26 @@ export type DashboardQueryResult = {
   errorMessage: string | null;
 };
 
+export type GlobalProjectFile = ProjectFile & {
+  projectName: string;
+  hasParsedBoq: boolean;
+};
+
+export type GlobalFilesQueryResult = {
+  files: GlobalProjectFile[];
+  errorMessage: string | null;
+};
+
+export type GlobalBoqItem = BoqItem & {
+  projectName: string;
+  sourceFileName: string;
+};
+
+export type GlobalBoqItemsQueryResult = {
+  items: GlobalBoqItem[];
+  errorMessage: string | null;
+};
+
 export const formatCurrency = (value: number) =>
   new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -502,6 +522,51 @@ export async function getProjectFilesForCurrentUser(projectId: string) {
   } satisfies ProjectFilesQueryResult;
 }
 
+export async function getFilesForCurrentUser() {
+  const userId = await getAuthenticatedUserId();
+
+  if (!userId) {
+    return {
+      files: [],
+      errorMessage: null,
+    } satisfies GlobalFilesQueryResult;
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const [projectsResult, filesResult, boqResult] = await Promise.all([
+    supabase.from("projects").select("id, name").eq("user_id", userId),
+    supabase.from("project_files").select("*").eq("user_id", userId).order("uploaded_at", { ascending: false }),
+    supabase.from("boq_items").select("source_file_id, project_file_id").eq("user_id", userId),
+  ]);
+
+  if (filesResult.error) {
+    return {
+      files: [],
+      errorMessage: filesResult.error.message,
+    } satisfies GlobalFilesQueryResult;
+  }
+
+  const projectNames = new Map(
+    ((projectsResult.data || []) as Array<{ id: string; name: string }>).map((project) => [project.id, project.name]),
+  );
+  const parsedFileIds = new Set(
+    boqResult.error
+      ? []
+      : ((boqResult.data || []) as Array<{ source_file_id?: string | null; project_file_id?: string | null }>)
+          .map((item) => item.source_file_id || item.project_file_id)
+          .filter((fileId): fileId is string => Boolean(fileId)),
+  );
+
+  return {
+    files: ((filesResult.data || []) as ProjectFileRow[]).map((row) => ({
+      ...mapProjectFile(row),
+      projectName: projectNames.get(row.project_id) || "Project",
+      hasParsedBoq: parsedFileIds.has(row.id),
+    })),
+    errorMessage: projectsResult.error?.message || boqResult.error?.message || null,
+  } satisfies GlobalFilesQueryResult;
+}
+
 export async function getBoqItemsForCurrentUser(projectId: string) {
   const userId = await getAuthenticatedUserId();
 
@@ -533,6 +598,58 @@ export async function getBoqItemsForCurrentUser(projectId: string) {
     items: (data as BoqItemRow[]).map(mapBoqItem),
     errorMessage: null,
   } satisfies BoqItemsQueryResult;
+}
+
+export async function getBoqItemsAcrossCurrentUser() {
+  const userId = await getAuthenticatedUserId();
+
+  if (!userId) {
+    return {
+      items: [],
+      errorMessage: null,
+    } satisfies GlobalBoqItemsQueryResult;
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const [projectsResult, filesResult, boqResult] = await Promise.all([
+    supabase.from("projects").select("id, name").eq("user_id", userId),
+    supabase.from("project_files").select("id, file_name").eq("user_id", userId),
+    supabase
+      .from("boq_items")
+      .select("*")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .order("sheet_name", { ascending: true })
+      .order("row_number", { ascending: true }),
+  ]);
+
+  if (boqResult.error) {
+    return {
+      items: [],
+      errorMessage: boqResult.error.message,
+    } satisfies GlobalBoqItemsQueryResult;
+  }
+
+  const projectNames = new Map(
+    ((projectsResult.data || []) as Array<{ id: string; name: string }>).map((project) => [project.id, project.name]),
+  );
+  const fileNames = new Map(
+    ((filesResult.data || []) as Array<{ id: string; file_name: string }>).map((file) => [file.id, file.file_name]),
+  );
+
+  return {
+    items: ((boqResult.data || []) as BoqItemRow[]).map((row) => {
+      const item = mapBoqItem(row);
+      const sourceFileId = row.source_file_id || row.project_file_id || "";
+
+      return {
+        ...item,
+        projectName: projectNames.get(row.project_id) || "Project",
+        sourceFileName: fileNames.get(sourceFileId) || "Source file",
+      };
+    }),
+    errorMessage: projectsResult.error?.message || filesResult.error?.message || null,
+  } satisfies GlobalBoqItemsQueryResult;
 }
 
 export async function getLearningRecordsForCurrentUser(projectId: string) {
