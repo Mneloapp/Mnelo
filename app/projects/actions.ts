@@ -731,6 +731,81 @@ export async function saveBoqColumnMappingAndParse(formData: FormData) {
   return { ok: true, message: "Column mapping saved and BOQ parsed." } satisfies ProjectDocumentActionResult;
 }
 
+export async function parseExistingProjectFile(formData: FormData) {
+  const projectId = readString(formData, "project_id");
+  const projectFileId = readString(formData, "project_file_id");
+
+  if (!projectId || !projectFileId) {
+    return { ok: false, error: "Missing file parse details." } satisfies ProjectDocumentActionResult;
+  }
+
+  const { supabase, user, error: userError } = await getAuthenticatedUser();
+
+  if (userError || !user) {
+    return { ok: false, error: "Sign in to parse project documents." } satisfies ProjectDocumentActionResult;
+  }
+
+  const { data: projectFile, error: fileError } = await supabase
+    .from("project_files")
+    .select("id, file_type, storage_path")
+    .eq("id", projectFileId)
+    .eq("project_id", projectId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (fileError || !projectFile) {
+    return { ok: false, error: fileError?.message || "Uploaded file not found." } satisfies ProjectDocumentActionResult;
+  }
+
+  if (!["xlsx", "xls"].includes(String(projectFile.file_type || "").toLowerCase())) {
+    return { ok: false, error: "Only Excel BOQ files can be parsed." } satisfies ProjectDocumentActionResult;
+  }
+
+  const { data: blob, error: downloadError } = await supabase.storage
+    .from("project-documents")
+    .download(projectFile.storage_path);
+
+  if (downloadError || !blob) {
+    return { ok: false, error: downloadError?.message || "Could not download uploaded workbook." } satisfies ProjectDocumentActionResult;
+  }
+
+  const savedMapping = await getProjectColumnMapping(supabase, projectId, user.id);
+  let rows: ParsedBoqRow[];
+
+  try {
+    rows = await parseBoqWorkbook(blob, savedMapping);
+  } catch (error) {
+    if (error instanceof MappingRequiredError) {
+      return {
+        ok: false,
+        error: error.message,
+        needsMapping: true,
+        mappingColumns: error.columns,
+        projectFileId,
+      } satisfies ProjectDocumentActionResult;
+    }
+
+    return actionError(error, "Excel parsing failed.");
+  }
+
+  await supabase.from("boq_items").delete().eq("source_file_id", projectFileId).eq("user_id", user.id);
+
+  const saveError = await saveParsedBoqRows({
+    projectFileId,
+    projectId,
+    rows,
+    supabase,
+    userId: user.id,
+  });
+
+  if (saveError) {
+    return { ok: false, error: saveError } satisfies ProjectDocumentActionResult;
+  }
+
+  revalidatePath(`/projects/${projectId}`);
+  return { ok: true, message: "BOQ parsed successfully." } satisfies ProjectDocumentActionResult;
+}
+
 export async function correctBoqClassification(formData: FormData) {
   const projectId = readString(formData, "project_id");
   const sourceFileId = readString(formData, "source_file_id");

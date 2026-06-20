@@ -23,9 +23,11 @@ function learningKey(sourceFileId: string | null, description: string) {
 export function BoqResultsTable({
   items,
   learningRecords = [],
+  showClassification = true,
 }: {
   items: BoqItem[];
   learningRecords?: LearningRecord[];
+  showClassification?: boolean;
 }) {
   const latestLearningByItem = new Map<string, LearningRecord>();
 
@@ -54,10 +56,14 @@ export function BoqResultsTable({
                 <th className="px-5 py-3 font-semibold">Unit</th>
                 <th className="px-5 py-3 text-right font-semibold">Rate</th>
                 <th className="px-5 py-3 text-right font-semibold">Amount</th>
-                <th className="px-5 py-3 font-semibold">Sheet</th>
-                <th className="px-5 py-3 text-right font-semibold">Row</th>
-                <th className="px-5 py-3 font-semibold">Classification</th>
-                <th className="px-5 py-3 font-semibold">Correction</th>
+                {showClassification ? (
+                  <>
+                    <th className="px-5 py-3 font-semibold">Sheet</th>
+                    <th className="px-5 py-3 text-right font-semibold">Row</th>
+                    <th className="px-5 py-3 font-semibold">Classification</th>
+                    <th className="px-5 py-3 font-semibold">Correction</th>
+                  </>
+                ) : null}
               </tr>
             </thead>
             <tbody className="divide-y divide-line bg-white">
@@ -86,56 +92,60 @@ export function BoqResultsTable({
                     <td className="whitespace-nowrap px-5 py-4 text-right text-ink/60">
                       {item.amount === null ? "—" : item.amount.toLocaleString()}
                     </td>
-                    <td className="whitespace-nowrap px-5 py-4 text-ink/60">{item.sheetName}</td>
-                    <td className="whitespace-nowrap px-5 py-4 text-right font-mono text-xs text-ink/45">
-                      {item.rowNumber}
-                    </td>
-                    <td className="min-w-56 px-5 py-4">
-                      <p className="font-medium text-ink">{finalCategory}</p>
-                      <p className="mt-1 text-xs text-ink/50">{finalSubcategory}</p>
-                      <p className="mt-2 text-xs text-ink/40">
-                        {predictedSupplierType} · {Math.round(confidenceScore * 100)}% confidence
-                      </p>
-                      {wasCorrected ? <Badge tone="amber">Corrected</Badge> : null}
-                    </td>
-                    <td className="min-w-72 px-5 py-4">
-                      {item.sourceFileId ? (
-                        <form action={correctBoqClassification} className="grid gap-2">
-                          <input name="project_id" type="hidden" value={item.projectId} />
-                          <input name="source_file_id" type="hidden" value={item.sourceFileId} />
-                          <input name="item_description" type="hidden" value={item.description} />
-                          <input name="predicted_category" type="hidden" value={predictedCategory} />
-                          <input name="predicted_subcategory" type="hidden" value={predictedSubcategory} />
-                          <input name="predicted_supplier_type" type="hidden" value={predictedSupplierType} />
-                          <input name="confidence_score" type="hidden" value={String(confidenceScore)} />
-                          <select
-                            className="h-9 rounded-lg border border-line bg-white px-2 text-xs outline-none transition focus:border-leaf-400 focus:ring-4 focus:ring-leaf-100"
-                            defaultValue={finalCategory}
-                            name="user_corrected_category"
-                          >
-                            {categoryOptions.map((category) => (
-                              <option key={category} value={category}>
-                                {category}
-                              </option>
-                            ))}
-                          </select>
-                          <input
-                            className="h-9 rounded-lg border border-line bg-white px-2 text-xs outline-none transition placeholder:text-ink/30 focus:border-leaf-400 focus:ring-4 focus:ring-leaf-100"
-                            defaultValue={finalSubcategory}
-                            name="user_corrected_subcategory"
-                            placeholder="Subcategory"
-                          />
-                          <button
-                            className="inline-flex h-9 items-center justify-center rounded-lg bg-ink px-3 text-xs font-semibold text-white transition hover:bg-leaf-900"
-                            type="submit"
-                          >
-                            Save correction
-                          </button>
-                        </form>
-                      ) : (
-                        <p className="text-xs text-ink/45">Upload source unavailable</p>
-                      )}
-                    </td>
+                    {showClassification ? (
+                      <>
+                        <td className="whitespace-nowrap px-5 py-4 text-ink/60">{item.sheetName}</td>
+                        <td className="whitespace-nowrap px-5 py-4 text-right font-mono text-xs text-ink/45">
+                          {item.rowNumber}
+                        </td>
+                        <td className="min-w-56 px-5 py-4">
+                          <p className="font-medium text-ink">{finalCategory}</p>
+                          <p className="mt-1 text-xs text-ink/50">{finalSubcategory}</p>
+                          <p className="mt-2 text-xs text-ink/40">
+                            {predictedSupplierType} · {Math.round(confidenceScore * 100)}% confidence
+                          </p>
+                          {wasCorrected ? <Badge tone="amber">Corrected</Badge> : null}
+                        </td>
+                        <td className="min-w-72 px-5 py-4">
+                          {item.sourceFileId ? (
+                            <form action={correctBoqClassification} className="grid gap-2">
+                              <input name="project_id" type="hidden" value={item.projectId} />
+                              <input name="source_file_id" type="hidden" value={item.sourceFileId} />
+                              <input name="item_description" type="hidden" value={item.description} />
+                              <input name="predicted_category" type="hidden" value={predictedCategory} />
+                              <input name="predicted_subcategory" type="hidden" value={predictedSubcategory} />
+                              <input name="predicted_supplier_type" type="hidden" value={predictedSupplierType} />
+                              <input name="confidence_score" type="hidden" value={String(confidenceScore)} />
+                              <select
+                                className="h-9 rounded-lg border border-line bg-white px-2 text-xs outline-none transition focus:border-leaf-400 focus:ring-4 focus:ring-leaf-100"
+                                defaultValue={finalCategory}
+                                name="user_corrected_category"
+                              >
+                                {categoryOptions.map((category) => (
+                                  <option key={category} value={category}>
+                                    {category}
+                                  </option>
+                                ))}
+                              </select>
+                              <input
+                                className="h-9 rounded-lg border border-line bg-white px-2 text-xs outline-none transition placeholder:text-ink/30 focus:border-leaf-400 focus:ring-4 focus:ring-leaf-100"
+                                defaultValue={finalSubcategory}
+                                name="user_corrected_subcategory"
+                                placeholder="Subcategory"
+                              />
+                              <button
+                                className="inline-flex h-9 items-center justify-center rounded-lg bg-ink px-3 text-xs font-semibold text-white transition hover:bg-leaf-900"
+                                type="submit"
+                              >
+                                Save correction
+                              </button>
+                            </form>
+                          ) : (
+                            <p className="text-xs text-ink/45">Upload source unavailable</p>
+                          )}
+                        </td>
+                      </>
+                    ) : null}
                   </tr>
                 );
               })}

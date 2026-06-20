@@ -17,6 +17,7 @@ export type BoqItem = {
   confidenceScore: number;
   sheetName: string;
   rowNumber: number;
+  createdAt: string;
 };
 
 export type ProjectRow = {
@@ -68,12 +69,15 @@ export type ProjectFileRow = {
 
 export type ProjectFile = {
   id: string;
+  projectId: string;
   fileName: string;
   fileType: string;
   fileSize: string;
+  fileSizeBytes: number;
   storagePath: string;
   documentType: DocumentType;
   uploadedAt: string;
+  uploadedAtRaw: string;
 };
 
 export type DocumentType = "BOQ Excel" | "Specification PDF" | "Drawing PDF" | "Other";
@@ -159,6 +163,33 @@ export type LearningSummary = {
   errorMessage: string | null;
 };
 
+export type DashboardProject = Project & {
+  boqItemCount: number;
+  fileCount: number;
+};
+
+export type DashboardActivity = {
+  id: string;
+  fileName: string;
+  projectId: string;
+  projectName: string;
+  uploadedAt: string;
+};
+
+export type DashboardSummary = {
+  totalProjects: number;
+  boqItems: number;
+  files: number;
+  storageUsed: string;
+};
+
+export type DashboardQueryResult = {
+  projects: DashboardProject[];
+  recentActivity: DashboardActivity[];
+  summary: DashboardSummary;
+  errorMessage: string | null;
+};
+
 export const formatCurrency = (value: number) =>
   new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -235,12 +266,15 @@ export function mapProject(row: ProjectRow): Project {
 export function mapProjectFile(row: ProjectFileRow): ProjectFile {
   return {
     id: row.id,
+    projectId: row.project_id,
     fileName: row.file_name,
     fileType: row.file_type,
     fileSize: formatFileSize(row.file_size),
+    fileSizeBytes: row.file_size,
     storagePath: row.storage_path,
     documentType: row.document_type,
     uploadedAt: formatDate(row.uploaded_at),
+    uploadedAtRaw: row.uploaded_at,
   };
 }
 
@@ -259,6 +293,7 @@ export function mapBoqItem(row: BoqItemRow): BoqItem {
     confidenceScore: Number(row.confidence_score || 0),
     sheetName: row.sheet_name,
     rowNumber: row.row_number,
+    createdAt: formatDate(row.created_at),
   };
 }
 
@@ -325,6 +360,84 @@ export async function getProjectsForCurrentUser() {
     projects: (data as ProjectRow[]).map(mapProject),
     errorMessage: null,
   } satisfies ProjectsQueryResult;
+}
+
+export async function getDashboardForCurrentUser() {
+  const userId = await getAuthenticatedUserId();
+
+  if (!userId) {
+    return {
+      projects: [],
+      recentActivity: [],
+      summary: {
+        totalProjects: 0,
+        boqItems: 0,
+        files: 0,
+        storageUsed: "0 B",
+      },
+      errorMessage: null,
+    } satisfies DashboardQueryResult;
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const [projectsResult, filesResult, boqResult] = await Promise.all([
+    supabase.from("projects").select("*").eq("user_id", userId).order("updated_at", { ascending: false }),
+    supabase.from("project_files").select("*").eq("user_id", userId).order("uploaded_at", { ascending: false }),
+    supabase.from("boq_items").select("id, project_id").eq("user_id", userId),
+  ]);
+
+  if (projectsResult.error) {
+    return {
+      projects: [],
+      recentActivity: [],
+      summary: {
+        totalProjects: 0,
+        boqItems: 0,
+        files: 0,
+        storageUsed: "0 B",
+      },
+      errorMessage: projectsResult.error.message,
+    } satisfies DashboardQueryResult;
+  }
+
+  const projectRows = (projectsResult.data || []) as ProjectRow[];
+  const projects = projectRows.map(mapProject);
+  const files = filesResult.error ? [] : ((filesResult.data || []) as ProjectFileRow[]);
+  const boqItems = boqResult.error ? [] : (((boqResult.data || []) as Array<{ id: string; project_id: string }>));
+  const projectNames = new Map(projects.map((project) => [project.id, project.name]));
+  const fileCounts = new Map<string, number>();
+  const boqCounts = new Map<string, number>();
+  const storageBytes = files.reduce((total, file) => total + Number(file.file_size || 0), 0);
+
+  for (const file of files) {
+    fileCounts.set(file.project_id, (fileCounts.get(file.project_id) || 0) + 1);
+  }
+
+  for (const item of boqItems) {
+    boqCounts.set(item.project_id, (boqCounts.get(item.project_id) || 0) + 1);
+  }
+
+  return {
+    projects: projects.map((project) => ({
+      ...project,
+      boqItemCount: boqCounts.get(project.id) || 0,
+      fileCount: fileCounts.get(project.id) || 0,
+    })),
+    recentActivity: files.slice(0, 6).map((file) => ({
+      id: file.id,
+      fileName: file.file_name,
+      projectId: file.project_id,
+      projectName: projectNames.get(file.project_id) || "Project",
+      uploadedAt: formatUpdatedAt(file.uploaded_at),
+    })),
+    summary: {
+      totalProjects: projects.length,
+      boqItems: boqItems.length,
+      files: files.length,
+      storageUsed: formatFileSize(storageBytes),
+    },
+    errorMessage: filesResult.error?.message || boqResult.error?.message || null,
+  } satisfies DashboardQueryResult;
 }
 
 export async function getProjectForCurrentUser(id: string) {

@@ -2,7 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { deleteProjectFile, saveBoqColumnMappingAndParse, uploadProjectDocument } from "@/app/projects/actions";
+import {
+  deleteProjectFile,
+  parseExistingProjectFile,
+  saveBoqColumnMappingAndParse,
+  uploadProjectDocument,
+} from "@/app/projects/actions";
 import type { ProjectDocumentActionResult } from "@/app/projects/actions";
 import type { ProjectFile } from "@/lib/data";
 
@@ -42,6 +47,7 @@ export function ProjectDocumentsPanel({
   const [mappingRequest, setMappingRequest] = useState<MappingRequest | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isSavingMapping, setIsSavingMapping] = useState(false);
+  const [parsingFileId, setParsingFileId] = useState<string | null>(null);
   const [deletingFileId, setDeletingFileId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -250,24 +256,80 @@ export function ProjectDocumentsPanel({
         <h3 className="text-sm font-semibold uppercase tracking-wide text-ink/45">Uploaded files</h3>
         {visibleFiles.length > 0 ? (
           <div className="mt-3 overflow-hidden rounded-xl border border-line">
+            <div className="hidden grid-cols-[1fr_9rem_9rem_14rem] gap-3 border-b border-line bg-mist/60 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-ink/45 md:grid">
+              <span>File name</span>
+              <span>Upload date</span>
+              <span>Parse status</span>
+              <span className="text-right">Actions</span>
+            </div>
             <div className="divide-y divide-line">
               {visibleFiles.map((file) => {
                 const hasParsedBoq = parsedFileIds.includes(file.id);
                 const isDeleting = deletingFileId === file.id;
+                const isParsing = parsingFileId === file.id;
+                const canParse = ["xlsx", "xls"].includes(file.fileType.toLowerCase());
 
                 return (
                   <div
-                    className="grid gap-3 bg-white px-4 py-3 text-sm md:grid-cols-[1fr_10rem_7rem_9rem_auto]"
+                    className="grid gap-3 bg-white px-4 py-3 text-sm md:grid-cols-[1fr_9rem_9rem_14rem]"
                     key={file.id}
                   >
                     <div>
                       <p className="font-medium text-ink">{file.fileName}</p>
-                      <p className="mt-1 font-mono text-xs text-ink/40">{file.storagePath}</p>
+                      <p className="mt-1 text-xs text-ink/45">
+                        {file.documentType} / {file.fileSize}
+                      </p>
                     </div>
-                    <p className="text-ink/65">{file.documentType}</p>
-                    <p className="text-ink/65">{file.fileSize}</p>
                     <p className="text-ink/55">{file.uploadedAt}</p>
-                    <div className="flex items-start justify-start md:justify-end">
+                    <p className={hasParsedBoq ? "font-medium text-leaf-700" : "text-ink/45"}>
+                      {hasParsedBoq ? "Parsed" : canParse ? "Not parsed" : "Not applicable"}
+                    </p>
+                    <div className="flex flex-wrap items-start justify-start gap-2 md:justify-end">
+                      {canParse ? (
+                        <button
+                          className="inline-flex h-8 items-center justify-center rounded-md bg-white px-3 text-xs font-semibold text-leaf-700 ring-1 ring-leaf-200 transition hover:bg-leaf-50 disabled:cursor-not-allowed disabled:opacity-60"
+                          disabled={Boolean(deletingFileId || parsingFileId)}
+                          onClick={async () => {
+                            setParsingFileId(file.id);
+                            setNotice(null);
+
+                            try {
+                              const formData = new FormData();
+                              formData.set("project_id", projectId);
+                              formData.set("project_file_id", file.id);
+
+                              const result = await parseExistingProjectFile(formData);
+
+                              if (!result.ok && result.needsMapping && result.projectFileId && result.mappingColumns) {
+                                setMappingRequest({
+                                  columns: result.mappingColumns,
+                                  projectFileId: result.projectFileId,
+                                });
+                                setNotice({
+                                  tone: "error",
+                                  message:
+                                    result.error ||
+                                    "Column detection confidence is low. Select BOQ columns manually.",
+                                });
+                                return;
+                              }
+
+                              await handleResult(result, "BOQ parsed successfully.");
+                            } catch (error) {
+                              console.error(error);
+                              setNotice({
+                                tone: "error",
+                                message: error instanceof Error ? error.message : "Unknown parse error.",
+                              });
+                            } finally {
+                              setParsingFileId(null);
+                            }
+                          }}
+                          type="button"
+                        >
+                          {isParsing ? "Parsing..." : hasParsedBoq ? "Re-parse" : "Parse"}
+                        </button>
+                      ) : null}
                       <button
                         aria-label={`Delete ${file.fileName}`}
                         className="inline-flex h-8 items-center justify-center rounded-md bg-white px-3 text-xs font-semibold text-red-700 ring-1 ring-red-200 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
