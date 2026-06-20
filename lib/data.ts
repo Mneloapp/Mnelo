@@ -5,13 +5,11 @@ export type ProjectRisk = "Low" | "Medium" | "High";
 
 export type BoqItem = {
   id: string;
-  system: string;
   description: string;
   quantity: number;
   unit: string;
-  unitRate: number;
-  confidence: number;
-  supplier: string;
+  sheetName: string;
+  rowNumber: number;
 };
 
 export type ProjectRow = {
@@ -47,7 +45,6 @@ export type Project = {
   workType: string;
   notes: string;
   risk: ProjectRisk;
-  boq: BoqItem[];
 };
 
 export type ProjectFileRow = {
@@ -74,6 +71,19 @@ export type ProjectFile = {
 
 export type DocumentType = "BOQ Excel" | "Specification PDF" | "Drawing PDF" | "Other";
 
+export type BoqItemRow = {
+  id: string;
+  project_id: string;
+  project_file_id: string | null;
+  user_id: string;
+  description: string;
+  quantity: number;
+  unit: string;
+  sheet_name: string;
+  row_number: number;
+  created_at: string;
+};
+
 export type ProjectsQueryResult = {
   projects: Project[];
   errorMessage: string | null;
@@ -89,38 +99,10 @@ export type ProjectFilesQueryResult = {
   errorMessage: string | null;
 };
 
-const sampleBoq: BoqItem[] = [
-  {
-    id: "M-104",
-    system: "HVAC",
-    description: "Variable air volume terminal with reheat coil",
-    quantity: 42,
-    unit: "ea",
-    unitRate: 1840,
-    confidence: 94,
-    supplier: "Trane",
-  },
-  {
-    id: "E-221",
-    system: "Electrical",
-    description: "LED troffer fixture, 2x4, dimmable driver",
-    quantity: 318,
-    unit: "ea",
-    unitRate: 128,
-    confidence: 91,
-    supplier: "Acuity",
-  },
-  {
-    id: "P-048",
-    system: "Plumbing",
-    description: "Copper domestic cold water pipe, type L",
-    quantity: 1840,
-    unit: "lf",
-    unitRate: 18,
-    confidence: 88,
-    supplier: "Ferguson",
-  },
-];
+export type BoqItemsQueryResult = {
+  items: BoqItem[];
+  errorMessage: string | null;
+};
 
 export const formatCurrency = (value: number) =>
   new Intl.NumberFormat("en-US", {
@@ -192,7 +174,6 @@ export function mapProject(row: ProjectRow): Project {
     workType: row.work_type || row.trade || "MEP",
     notes: row.notes || "",
     risk: row.risk,
-    boq: sampleBoq,
   };
 }
 
@@ -205,6 +186,17 @@ export function mapProjectFile(row: ProjectFileRow): ProjectFile {
     storagePath: row.storage_path,
     documentType: row.document_type,
     uploadedAt: formatDate(row.uploaded_at),
+  };
+}
+
+export function mapBoqItem(row: BoqItemRow): BoqItem {
+  return {
+    id: row.id,
+    description: row.description,
+    quantity: Number(row.quantity || 0),
+    unit: row.unit,
+    sheetName: row.sheet_name,
+    rowNumber: row.row_number,
   };
 }
 
@@ -312,4 +304,37 @@ export async function getProjectFilesForCurrentUser(projectId: string) {
     files: (data as ProjectFileRow[]).map(mapProjectFile),
     errorMessage: null,
   } satisfies ProjectFilesQueryResult;
+}
+
+export async function getBoqItemsForCurrentUser(projectId: string) {
+  const userId = await getAuthenticatedUserId();
+
+  if (!userId) {
+    return {
+      items: [],
+      errorMessage: null,
+    } satisfies BoqItemsQueryResult;
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("boq_items")
+    .select("*")
+    .eq("project_id", projectId)
+    .eq("user_id", userId)
+    .order("created_at", { ascending: true })
+    .order("sheet_name", { ascending: true })
+    .order("row_number", { ascending: true });
+
+  if (error) {
+    return {
+      items: [],
+      errorMessage: error.message,
+    } satisfies BoqItemsQueryResult;
+  }
+
+  return {
+    items: (data as BoqItemRow[]).map(mapBoqItem),
+    errorMessage: null,
+  } satisfies BoqItemsQueryResult;
 }

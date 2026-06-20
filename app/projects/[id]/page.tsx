@@ -3,7 +3,7 @@ import { AppNav } from "@/components/app-nav";
 import { Badge, Button, Shell, StatCard } from "@/components/ui";
 import { BoqResultsTable } from "@/components/boq-results-table";
 import { uploadProjectDocument } from "@/app/projects/actions";
-import { getProjectFilesForCurrentUser, getProjectForCurrentUser } from "@/lib/data";
+import { getBoqItemsForCurrentUser, getProjectFilesForCurrentUser, getProjectForCurrentUser } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
 
@@ -15,14 +15,17 @@ export default async function ProjectDetailsPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const { id } = await params;
-  const [{ error }, projectResult, fileResult] = await Promise.all([
+  const [{ error }, projectResult, fileResult, boqResult] = await Promise.all([
     searchParams,
     getProjectForCurrentUser(id),
     getProjectFilesForCurrentUser(id),
+    getBoqItemsForCurrentUser(id),
   ]);
   const { project, errorMessage } = projectResult;
   const { files, errorMessage: filesErrorMessage } = fileResult;
+  const { items: boqItems, errorMessage: boqErrorMessage } = boqResult;
   const showFilesError = process.env.NODE_ENV === "development" && filesErrorMessage;
+  const showBoqError = process.env.NODE_ENV === "development" && boqErrorMessage;
 
   if (!project) {
     if (errorMessage) {
@@ -126,7 +129,7 @@ export default async function ProjectDetailsPage({
           <div>
             <h2 className="text-lg font-semibold tracking-tight text-ink">Upload Documents</h2>
             <p className="mt-1 text-sm text-ink/55">
-              Upload BOQ spreadsheets, specifications, drawings, and tender PDFs. Parsing comes later.
+              Upload BOQ spreadsheets, specifications, drawings, and tender PDFs. Excel BOQs are parsed automatically.
             </p>
           </div>
           <Badge tone="neutral">.xlsx · .xls · .pdf</Badge>
@@ -210,7 +213,12 @@ export default async function ProjectDetailsPage({
       </section>
 
       <div id="boq">
-        <BoqResultsTable items={project.boq} />
+        <BoqResultsTable items={boqItems} />
+        {showBoqError ? (
+          <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 font-mono text-xs text-red-800">
+            {boqErrorMessage}
+          </p>
+        ) : null}
       </div>
     </Shell>
   );
