@@ -1,6 +1,6 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
-export type ProjectStatus = "Estimating" | "Procurement" | "Awarded";
+export type ProjectStatus = "Draft" | "Estimating" | "Procurement" | "Awarded";
 export type ProjectRisk = "Low" | "Medium" | "High";
 
 export type BoqItem = {
@@ -24,7 +24,9 @@ export type ProjectRow = {
   contract_value: number | null;
   progress: number;
   drawings: number;
-  trade: string | null;
+  work_type: string | null;
+  notes: string | null;
+  trade?: string | null;
   risk: ProjectRisk;
   created_at: string;
   updated_at: string;
@@ -36,12 +38,14 @@ export type Project = {
   client: string;
   location: string;
   status: ProjectStatus;
+  createdAt: string;
   updatedAt: string;
   contractValue: number;
   value: string;
   progress: number;
   drawings: number;
-  trade: string;
+  workType: string;
+  notes: string;
   risk: ProjectRisk;
   boq: BoqItem[];
 };
@@ -119,6 +123,14 @@ function formatUpdatedAt(value: string) {
   return `${diffDays} day${diffDays === 1 ? "" : "s"} ago`;
 }
 
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(new Date(value));
+}
+
 export function mapProject(row: ProjectRow): Project {
   const contractValue = Number(row.contract_value || 0);
 
@@ -127,13 +139,15 @@ export function mapProject(row: ProjectRow): Project {
     name: row.name,
     client: row.client || "No client set",
     location: row.location || "No location set",
-    status: row.status,
+    status: row.status || "Draft",
+    createdAt: formatDate(row.created_at),
     updatedAt: formatUpdatedAt(row.updated_at),
     contractValue,
     value: formatCurrency(contractValue),
     progress: row.progress,
     drawings: row.drawings,
-    trade: row.trade || "MEP",
+    workType: row.work_type || row.trade || "MEP",
+    notes: row.notes || "",
     risk: row.risk,
     boq: sampleBoq,
   };

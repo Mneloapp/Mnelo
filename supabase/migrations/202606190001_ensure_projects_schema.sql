@@ -6,10 +6,12 @@ create table if not exists public.projects (
   name text not null default 'Untitled Project',
   client text,
   location text,
-  status text not null default 'Estimating',
+  status text not null default 'Draft',
   contract_value numeric(14, 2) not null default 0,
   progress integer not null default 0,
   drawings integer not null default 0,
+  work_type text,
+  notes text,
   trade text not null default 'MEP',
   risk text not null default 'Low',
   created_at timestamptz not null default now(),
@@ -22,10 +24,12 @@ alter table public.projects
   add column if not exists name text default 'Untitled Project',
   add column if not exists client text,
   add column if not exists location text,
-  add column if not exists status text default 'Estimating',
+  add column if not exists status text default 'Draft',
   add column if not exists contract_value numeric(14, 2) default 0,
   add column if not exists progress integer default 0,
   add column if not exists drawings integer default 0,
+  add column if not exists work_type text,
+  add column if not exists notes text,
   add column if not exists trade text default 'MEP',
   add column if not exists risk text default 'Low',
   add column if not exists created_at timestamptz default now(),
@@ -35,10 +39,11 @@ update public.projects
 set
   id = coalesce(id, gen_random_uuid()),
   name = coalesce(nullif(name, ''), 'Untitled Project'),
-  status = coalesce(status, 'Estimating'),
+  status = coalesce(status, 'Draft'),
   contract_value = coalesce(contract_value, 0),
   progress = coalesce(progress, 0),
   drawings = coalesce(drawings, 0),
+  work_type = coalesce(nullif(work_type, ''), nullif(trade, '')),
   trade = coalesce(nullif(trade, ''), 'MEP'),
   risk = coalesce(risk, 'Low'),
   created_at = coalesce(created_at, now()),
@@ -49,7 +54,7 @@ alter table public.projects
   alter column id set not null,
   alter column name set default 'Untitled Project',
   alter column name set not null,
-  alter column status set default 'Estimating',
+  alter column status set default 'Draft',
   alter column status set not null,
   alter column contract_value set default 0,
   alter column contract_value set not null,
@@ -117,7 +122,7 @@ begin
   ) then
     alter table public.projects
       add constraint projects_status_check
-      check (status in ('Estimating', 'Procurement', 'Awarded'));
+      check (status in ('Draft', 'Estimating', 'Procurement', 'Awarded'));
   end if;
 
   if not exists (

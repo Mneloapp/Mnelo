@@ -3,6 +3,7 @@ import { Project } from "@/lib/data";
 import { Badge } from "@/components/ui";
 
 const statusTone = {
+  Draft: "neutral",
   Estimating: "amber",
   Procurement: "green",
   Awarded: "neutral",
@@ -25,29 +26,20 @@ export function ProjectCard({ project }: { project: Project }) {
       </div>
       <div className="mt-5 grid grid-cols-2 gap-4 text-sm">
         <div>
-          <p className="text-ink/45">Value</p>
-          <p className="mt-1 font-semibold text-ink">{project.value}</p>
+          <p className="text-ink/45">Location</p>
+          <p className="mt-1 font-semibold text-ink">{project.location}</p>
         </div>
         <div>
-          <p className="text-ink/45">Drawings</p>
-          <p className="mt-1 font-semibold text-ink">{project.drawings}</p>
+          <p className="text-ink/45">Work type</p>
+          <p className="mt-1 font-semibold text-ink">{project.workType}</p>
         </div>
         <div>
-          <p className="text-ink/45">Trade</p>
-          <p className="mt-1 font-semibold text-ink">{project.trade}</p>
+          <p className="text-ink/45">Created</p>
+          <p className="mt-1 font-semibold text-ink">{project.createdAt}</p>
         </div>
         <div>
-          <p className="text-ink/45">Risk</p>
-          <p className="mt-1 font-semibold text-ink">{project.risk}</p>
-        </div>
-      </div>
-      <div className="mt-5">
-        <div className="flex justify-between text-xs font-medium text-ink/50">
-          <span>Estimate readiness</span>
-          <span>{project.progress}%</span>
-        </div>
-        <div className="mt-2 h-2 rounded-full bg-mist">
-          <div className="h-2 rounded-full bg-leaf-500" style={{ width: `${project.progress}%` }} />
+          <p className="text-ink/45">Status</p>
+          <p className="mt-1 font-semibold text-ink">{project.status}</p>
         </div>
       </div>
     </Link>

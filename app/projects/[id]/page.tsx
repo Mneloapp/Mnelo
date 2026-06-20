@@ -65,7 +65,7 @@ export default async function ProjectDetailsPage({
       </section>
 
       <section className="grid gap-4 md:grid-cols-4">
-        <StatCard label="Contract value" value={project.value} detail={`${project.trade} package`} />
+        <StatCard label="Contract value" value={project.value} detail={`${project.workType} package`} />
         <StatCard label="Drawings" value={String(project.drawings)} detail="Parsed and indexed" />
         <StatCard label="Readiness" value={`${project.progress}%`} detail="Estimator approved" />
         <StatCard label="Risk" value={project.risk} detail="Based on scope deltas" />
@@ -76,6 +76,7 @@ export default async function ProjectDetailsPage({
           <h2 className="text-lg font-semibold tracking-tight text-ink">AI workforce</h2>
           <div className="mt-4 space-y-3">
             {[
+              ["Project intake", project.notes || "Ready for drawings, scope notes, and procurement context."],
               ["Takeoff agent", "Extracted mechanical and plumbing quantities from latest drawing set."],
               ["Scope agent", "Matched specification sections against BOQ coverage."],
               ["Procurement agent", "Mapped preferred suppliers and alternates for long-lead items."],

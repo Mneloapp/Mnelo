@@ -44,8 +44,8 @@ export default async function ProjectsPage({
           </div>
         ) : null}
 
-        <form action={createProject} className="grid gap-4 lg:grid-cols-6">
-          <label className="block lg:col-span-2">
+        <form action={createProject} className="grid gap-4 lg:grid-cols-2">
+          <label className="block">
             <span className="text-sm font-medium text-ink/70">Project name</span>
             <input
               className="mt-2 h-11 w-full rounded-lg border border-line bg-white px-3 text-sm outline-none transition placeholder:text-ink/30 focus:border-leaf-400 focus:ring-4 focus:ring-leaf-100"
@@ -54,7 +54,7 @@ export default async function ProjectsPage({
               required
             />
           </label>
-          <label className="block lg:col-span-2">
+          <label className="block">
             <span className="text-sm font-medium text-ink/70">Client</span>
             <input
               className="mt-2 h-11 w-full rounded-lg border border-line bg-white px-3 text-sm outline-none transition placeholder:text-ink/30 focus:border-leaf-400 focus:ring-4 focus:ring-leaf-100"
@@ -62,7 +62,7 @@ export default async function ProjectsPage({
               placeholder="Helio Health Group"
             />
           </label>
-          <label className="block lg:col-span-2">
+          <label className="block">
             <span className="text-sm font-medium text-ink/70">Location</span>
             <input
               className="mt-2 h-11 w-full rounded-lg border border-line bg-white px-3 text-sm outline-none transition placeholder:text-ink/30 focus:border-leaf-400 focus:ring-4 focus:ring-leaf-100"
@@ -70,50 +70,25 @@ export default async function ProjectsPage({
               placeholder="Austin, TX"
             />
           </label>
+          <label className="block">
+            <span className="text-sm font-medium text-ink/70">Work type</span>
+            <input
+              className="mt-2 h-11 w-full rounded-lg border border-line bg-white px-3 text-sm outline-none transition placeholder:text-ink/30 focus:border-leaf-400 focus:ring-4 focus:ring-leaf-100"
+              name="work_type"
+              placeholder="MEP estimate"
+            />
+          </label>
           <label className="block lg:col-span-2">
-            <span className="text-sm font-medium text-ink/70">Trade</span>
-            <input
-              className="mt-2 h-11 w-full rounded-lg border border-line bg-white px-3 text-sm outline-none transition placeholder:text-ink/30 focus:border-leaf-400 focus:ring-4 focus:ring-leaf-100"
-              name="trade"
-              placeholder="Full MEP"
+            <span className="text-sm font-medium text-ink/70">Notes</span>
+            <textarea
+              className="mt-2 min-h-24 w-full rounded-lg border border-line bg-white px-3 py-3 text-sm outline-none transition placeholder:text-ink/30 focus:border-leaf-400 focus:ring-4 focus:ring-leaf-100"
+              name="notes"
+              placeholder="Optional project context, scope notes, or procurement instructions"
             />
           </label>
-          <label className="block">
-            <span className="text-sm font-medium text-ink/70">Value</span>
-            <input
-              className="mt-2 h-11 w-full rounded-lg border border-line bg-white px-3 text-sm outline-none transition placeholder:text-ink/30 focus:border-leaf-400 focus:ring-4 focus:ring-leaf-100"
-              min="0"
-              name="contract_value"
-              placeholder="4800000"
-              step="1000"
-              type="number"
-            />
-          </label>
-          <label className="block">
-            <span className="text-sm font-medium text-ink/70">Status</span>
-            <select
-              className="mt-2 h-11 w-full rounded-lg border border-line bg-white px-3 text-sm outline-none transition focus:border-leaf-400 focus:ring-4 focus:ring-leaf-100"
-              name="status"
-            >
-              <option>Estimating</option>
-              <option>Procurement</option>
-              <option>Awarded</option>
-            </select>
-          </label>
-          <label className="block">
-            <span className="text-sm font-medium text-ink/70">Risk</span>
-            <select
-              className="mt-2 h-11 w-full rounded-lg border border-line bg-white px-3 text-sm outline-none transition focus:border-leaf-400 focus:ring-4 focus:ring-leaf-100"
-              name="risk"
-            >
-              <option>Low</option>
-              <option>Medium</option>
-              <option>High</option>
-            </select>
-          </label>
-          <div className="flex items-end lg:col-span-1">
+          <div className="flex items-end lg:col-span-2">
             <button
-              className="inline-flex h-11 w-full items-center justify-center rounded-lg bg-ink px-4 text-sm font-semibold text-white shadow-soft transition hover:bg-leaf-900"
+              className="inline-flex h-11 w-full items-center justify-center rounded-lg bg-ink px-4 text-sm font-semibold text-white shadow-soft transition hover:bg-leaf-900 sm:w-auto"
               type="submit"
             >
               Create Project
