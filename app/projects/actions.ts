@@ -579,17 +579,6 @@ export async function deleteProjectFile(formData: FormData) {
     );
   }
 
-  const { error: learningError } = await supabase
-    .from("ai_training_data")
-    .delete()
-    .eq("project_id", projectId)
-    .eq("user_id", user.id)
-    .eq("source_file_id", fileId);
-
-  if (learningError) {
-    redirect(`/projects/${projectId}?error=${encodeURIComponent(learningError.message)}`);
-  }
-
   const { error: boqError } = await supabase
     .from("boq_items")
     .delete()
@@ -621,6 +610,5 @@ export async function deleteProjectFile(formData: FormData) {
   }
 
   revalidatePath(`/projects/${projectId}`);
-  revalidatePath("/learning");
   redirect(`/projects/${projectId}?message=${encodeURIComponent("File deleted successfully.")}`);
 }
