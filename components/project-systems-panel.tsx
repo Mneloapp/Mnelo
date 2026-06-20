@@ -11,7 +11,7 @@ import { EmptyState, ErrorMessage } from "@/components/ui";
 const systemOptions = getSystemRuleOptions();
 
 function defaultCategoryForSystem(systemName: string) {
-  return systemOptions.find((option) => option.systemName === systemName)?.categoryName || "General scope";
+  return systemOptions.find((option) => option.systemName === systemName)?.categoryName || "Needs review";
 }
 
 export function ProjectSystemsPanel({
@@ -255,7 +255,7 @@ export function ProjectSystemsPanel({
                                 {option.systemName}
                               </option>
                             ))}
-                            <option value="General">General</option>
+                            <option value="Needs Review">Needs Review</option>
                           </select>
                           <input
                             className="h-9 rounded-lg border border-[#e5e7eb] bg-white px-2 text-xs outline-none transition placeholder:text-[#94a3b8] focus:border-[#16a34a] focus:ring-4 focus:ring-[#dcfce7]"

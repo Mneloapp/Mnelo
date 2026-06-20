@@ -215,17 +215,53 @@ function predictClassification(description: string): ClassificationPrediction {
 }
 
 function descriptionTokens(description: string) {
+  const stopWords = new Set([
+    "and",
+    "the",
+    "with",
+    "for",
+    "item",
+    "works",
+    "work",
+    "supply",
+    "installation",
+    "მოწყობა",
+    "სამუშაო",
+    "სამუშაოები",
+    "მონტაჟი",
+    "მიწოდება",
+    "ერთეული",
+    "количество",
+    "работ",
+    "работы",
+    "монтаж",
+    "поставка",
+  ]);
+
   return new Set(
     description
       .toLowerCase()
       .replace(/[^\p{L}\p{N}\s]/gu, " ")
       .split(/\s+/)
-      .filter((token) => token.length > 2),
+      .map((token) => token.trim())
+      .filter((token) => token.length > 2 && !stopWords.has(token)),
   );
 }
 
+function tokenSimilarity(left: string, right: string) {
+  if (left === right) {
+    return 1;
+  }
+
+  if (left.length >= 4 && right.length >= 4 && (left.includes(right) || right.includes(left))) {
+    return 0.72;
+  }
+
+  return 0;
+}
+
 function findLearnedClassification(description: string, learnedClassifications: LearnedClassification[]) {
-  const tokens = descriptionTokens(description);
+  const tokens = Array.from(descriptionTokens(description));
   let bestMatch: { score: number; systemName: string; categoryName: string } | null = null;
 
   for (const learnedClassification of learnedClassifications) {
@@ -237,10 +273,16 @@ function findLearnedClassification(description: string, learnedClassifications: 
       continue;
     }
 
-    const learnedTokens = descriptionTokens(learnedDescription);
-    const intersection = Array.from(tokens).filter((token) => learnedTokens.has(token)).length;
-    const union = new Set([...Array.from(tokens), ...Array.from(learnedTokens)]).size;
-    const score = union > 0 ? intersection / union : 0;
+    const learnedTokens = Array.from(descriptionTokens(learnedDescription));
+    const directHits = tokens.filter((token) => learnedTokens.includes(token)).length;
+    const fuzzyHits = tokens.reduce((total, token) => {
+      const bestTokenScore = learnedTokens.reduce((best, learnedToken) => Math.max(best, tokenSimilarity(token, learnedToken)), 0);
+
+      return total + bestTokenScore;
+    }, 0);
+    const coverage = tokens.length > 0 ? Math.max(directHits, fuzzyHits) / tokens.length : 0;
+    const reverseCoverage = learnedTokens.length > 0 ? directHits / learnedTokens.length : 0;
+    const score = Math.max(coverage, reverseCoverage);
 
     if (
       description.toLowerCase().includes(learnedDescription.toLowerCase()) ||
@@ -255,7 +297,7 @@ function findLearnedClassification(description: string, learnedClassifications: 
     }
   }
 
-  if (!bestMatch || bestMatch.score < 0.42) {
+  if (!bestMatch || bestMatch.score < 0.34) {
     return null;
   }
 
@@ -1253,24 +1295,41 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
   let updatedCount = 0;
   let firstError: string | null = null;
 
-  for (const [index, row] of rows.entries()) {
+  const updateJobs = rows.map((row, index) => {
     const classification = classifications[index];
     const systemId = systemIdsByName.get(classification.systemName);
     const categoryId = systemId ? categoryIdsByKey.get(`${systemId}:${classification.categoryName}`) : undefined;
-    const updateError = await updateBoqItemClassification({
+
+    return {
       categoryId,
       classification,
       row,
-      supabase,
       systemId,
-    });
+    };
+  });
 
-    if (updateError) {
-      firstError ||= updateError;
-      continue;
+  for (let index = 0; index < updateJobs.length; index += 25) {
+    const batch = updateJobs.slice(index, index + 25);
+    const results = await Promise.all(
+      batch.map((job) =>
+        updateBoqItemClassification({
+          categoryId: job.categoryId,
+          classification: job.classification,
+          row: job.row,
+          supabase,
+          systemId: job.systemId,
+        }),
+      ),
+    );
+
+    for (const updateError of results) {
+      if (updateError) {
+        firstError ||= updateError;
+        continue;
+      }
+
+      updatedCount += 1;
     }
-
-    updatedCount += 1;
   }
 
   if (updatedCount === 0) {
@@ -1322,6 +1381,11 @@ export async function correctBoqItemSystemClassification(formData: FormData) {
       return { ok: false, error: rowError?.message || "BOQ item not found." } satisfies ProjectDocumentActionResult;
     }
 
+    const previousClassification = classifyBoqSystem(
+      (row as BoqClassificationRow).description,
+      (row as BoqClassificationRow).category,
+      (row as BoqClassificationRow).subcategory,
+    );
     const classification = {
       categoryName,
       confidenceScore: 1,
@@ -1354,10 +1418,10 @@ export async function correctBoqItemSystemClassification(formData: FormData) {
       source_type: "system_classification_correction",
       source_id: itemId,
       item_description: (row as BoqClassificationRow).description,
-      predicted_category: (row as BoqClassificationRow).category || "General",
-      predicted_subcategory: (row as BoqClassificationRow).subcategory || "Unclassified",
-      predicted_supplier_type: "General supplier",
-      confidence_score: 1,
+      predicted_category: (row as BoqClassificationRow).category || previousClassification.systemName,
+      predicted_subcategory: (row as BoqClassificationRow).subcategory || previousClassification.categoryName,
+      predicted_supplier_type: previousClassification.supplierType,
+      confidence_score: previousClassification.confidenceScore,
       user_corrected_category: systemName,
       user_corrected_subcategory: categoryName,
       final_category: systemName,
