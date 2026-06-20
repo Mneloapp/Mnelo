@@ -37,7 +37,7 @@ export async function WorkspaceShell({
   return (
     <main className="min-h-screen bg-[#f8faf8] text-[#0b1712]">
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-[#e5e7eb] bg-white/92 px-5 py-6 shadow-[16px_0_60px_rgba(15,61,46,0.04)] backdrop-blur lg:flex">
-        <Link href="/dashboard" className="flex items-center gap-3">
+        <Link href="/" className="flex items-center gap-3 rounded-xl transition hover:opacity-80">
           <MneloLogo />
         </Link>
 
@@ -79,7 +79,7 @@ export async function WorkspaceShell({
 
       <div className="lg:pl-64">
         <div className="sticky top-0 z-20 flex items-center justify-between border-b border-[#e5e7eb] bg-white/88 px-4 py-3 backdrop-blur lg:hidden">
-          <Link href="/dashboard" className="flex items-center gap-2 text-lg font-semibold">
+          <Link href="/" className="flex items-center gap-2 rounded-xl text-lg font-semibold transition hover:opacity-80">
             <MneloLogo className="[&_svg]:h-8 [&_svg]:w-8 [&_span]:text-xl" />
           </Link>
           <div className="grid h-9 w-9 place-items-center rounded-full bg-[#dcfce7] text-xs font-bold text-[#087a36]">
