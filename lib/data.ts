@@ -1,3 +1,4 @@
+import { classifyBoqSystem, normalizeTakeoffUnit } from "@/lib/classification";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export type ProjectStatus = "Draft" | "Estimating" | "Procurement" | "Awarded";
@@ -18,6 +19,11 @@ export type BoqItem = {
   sheetName: string;
   rowNumber: number;
   createdAt: string;
+};
+
+export type SystemBoqItem = BoqItem & {
+  takeoffQuantity: number | null;
+  takeoffUnit: string;
 };
 
 export type ProjectRow = {
@@ -96,6 +102,8 @@ export type BoqItemRow = {
   category?: string | null;
   subcategory?: string | null;
   confidence_score?: number | null;
+  takeoff_quantity?: number | null;
+  takeoff_unit?: string | null;
   sheet_name: string;
   row_number: number;
   created_at: string;
@@ -118,6 +126,28 @@ export type ProjectFilesQueryResult = {
 
 export type BoqItemsQueryResult = {
   items: BoqItem[];
+  errorMessage: string | null;
+};
+
+export type ProjectSystemCategory = {
+  name: string;
+  itemCount: number;
+  totalAmount: number;
+  units: Array<{ unit: string; quantity: number }>;
+  items: SystemBoqItem[];
+};
+
+export type ProjectSystemSummary = {
+  name: string;
+  itemCount: number;
+  totalAmount: number;
+  confidenceAverage: number;
+  categories: ProjectSystemCategory[];
+  units: Array<{ unit: string; quantity: number }>;
+};
+
+export type ProjectSystemsQueryResult = {
+  systems: ProjectSystemSummary[];
   errorMessage: string | null;
 };
 
@@ -598,6 +628,121 @@ export async function getBoqItemsForCurrentUser(projectId: string) {
     items: (data as BoqItemRow[]).map(mapBoqItem),
     errorMessage: null,
   } satisfies BoqItemsQueryResult;
+}
+
+function sortedUnitTotals(unitTotals: Map<string, number>) {
+  return Array.from(unitTotals.entries())
+    .map(([unit, quantity]) => ({ quantity, unit }))
+    .sort((a, b) => b.quantity - a.quantity);
+}
+
+export async function getProjectSystemsForCurrentUser(projectId: string) {
+  const userId = await getAuthenticatedUserId();
+
+  if (!userId) {
+    return {
+      systems: [],
+      errorMessage: null,
+    } satisfies ProjectSystemsQueryResult;
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("boq_items")
+    .select("*")
+    .eq("project_id", projectId)
+    .eq("user_id", userId)
+    .order("row_number", { ascending: true });
+
+  if (error) {
+    return {
+      systems: [],
+      errorMessage: error.message,
+    } satisfies ProjectSystemsQueryResult;
+  }
+
+  const systems = new Map<
+    string,
+    {
+      categories: Map<string, ProjectSystemCategory & { unitTotals: Map<string, number> }>;
+      confidenceTotal: number;
+      itemCount: number;
+      name: string;
+      totalAmount: number;
+      unitTotals: Map<string, number>;
+    }
+  >();
+
+  for (const row of (data || []) as BoqItemRow[]) {
+    const item = mapBoqItem(row);
+    const classification = classifyBoqSystem(item.description, item.category, item.subcategory);
+    const systemName = item.category && item.category !== "General" ? item.category : classification.systemName;
+    const categoryName =
+      item.subcategory && item.subcategory !== "Unclassified" ? item.subcategory : classification.categoryName;
+    const takeoffQuantity =
+      row.takeoff_quantity === null || row.takeoff_quantity === undefined
+        ? item.quantity
+        : Number(row.takeoff_quantity || 0);
+    const takeoffUnit = normalizeTakeoffUnit(row.takeoff_unit || item.unit);
+    const systemItem = {
+      ...item,
+      takeoffQuantity,
+      takeoffUnit,
+    } satisfies SystemBoqItem;
+    const system = systems.get(systemName) || {
+      categories: new Map<string, ProjectSystemCategory & { unitTotals: Map<string, number> }>(),
+      confidenceTotal: 0,
+      itemCount: 0,
+      name: systemName,
+      totalAmount: 0,
+      unitTotals: new Map<string, number>(),
+    };
+    const category = system.categories.get(categoryName) || {
+      itemCount: 0,
+      items: [],
+      name: categoryName,
+      totalAmount: 0,
+      unitTotals: new Map<string, number>(),
+      units: [],
+    };
+
+    system.itemCount += 1;
+    system.totalAmount += item.amount || 0;
+    system.confidenceTotal += item.confidenceScore || classification.confidenceScore;
+    category.itemCount += 1;
+    category.totalAmount += item.amount || 0;
+    category.items.push(systemItem);
+
+    if (takeoffQuantity !== null) {
+      system.unitTotals.set(takeoffUnit, (system.unitTotals.get(takeoffUnit) || 0) + takeoffQuantity);
+      category.unitTotals.set(takeoffUnit, (category.unitTotals.get(takeoffUnit) || 0) + takeoffQuantity);
+    }
+
+    system.categories.set(categoryName, category);
+    systems.set(systemName, system);
+  }
+
+  return {
+    systems: Array.from(systems.values())
+      .map((system) => ({
+        categories: Array.from(system.categories.values())
+          .map((category) => ({
+            itemCount: category.itemCount,
+            items: category.items,
+            name: category.name,
+            totalAmount: category.totalAmount,
+            units: sortedUnitTotals(category.unitTotals),
+          }))
+          .sort((a, b) => b.itemCount - a.itemCount),
+        confidenceAverage: system.itemCount > 0 ? Math.round((system.confidenceTotal / system.itemCount) * 100) : 0,
+        itemCount: system.itemCount,
+        name: system.name,
+        totalAmount: system.totalAmount,
+        units: sortedUnitTotals(system.unitTotals),
+      }))
+      .sort((a, b) => b.itemCount - a.itemCount),
+    errorMessage: null,
+  } satisfies ProjectSystemsQueryResult;
 }
 
 export async function getBoqItemsAcrossCurrentUser() {

@@ -3,12 +3,14 @@ import { notFound } from "next/navigation";
 import { Plus } from "lucide-react";
 import { BoqResultsTable } from "@/components/boq-results-table";
 import { ProjectDocumentsPanel } from "@/components/project-documents-panel";
+import { ProjectSystemsPanel } from "@/components/project-systems-panel";
 import { WorkspaceShell } from "@/components/workspace-shell";
 import {
   getBoqItemsForCurrentUser,
   getLearningRecordsForCurrentUser,
   getProjectFilesForCurrentUser,
   getProjectForCurrentUser,
+  getProjectSystemsForCurrentUser,
 } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
@@ -31,19 +33,22 @@ export default async function ProjectDetailsPage({
   searchParams: Promise<{ error?: string; message?: string }>;
 }) {
   const { id } = await params;
-  const [{ error, message }, projectResult, fileResult, boqResult, learningResult] = await Promise.all([
+  const [{ error, message }, projectResult, fileResult, boqResult, learningResult, systemsResult] = await Promise.all([
     searchParams,
     getProjectForCurrentUser(id),
     getProjectFilesForCurrentUser(id),
     getBoqItemsForCurrentUser(id),
     getLearningRecordsForCurrentUser(id),
+    getProjectSystemsForCurrentUser(id),
   ]);
   const { project, errorMessage } = projectResult;
   const { files, errorMessage: filesErrorMessage } = fileResult;
   const { items: boqItems, errorMessage: boqErrorMessage } = boqResult;
   const { records: learningRecords, errorMessage: learningErrorMessage } = learningResult;
+  const { systems, errorMessage: systemsErrorMessage } = systemsResult;
   const showFilesError = process.env.NODE_ENV === "development" && filesErrorMessage;
-  const showBoqError = process.env.NODE_ENV === "development" && (boqErrorMessage || learningErrorMessage);
+  const showBoqError =
+    process.env.NODE_ENV === "development" && (boqErrorMessage || learningErrorMessage || systemsErrorMessage);
   const parsedFileIds = Array.from(
     new Set(boqItems.map((item) => item.sourceFileId).filter((fileId): fileId is string => Boolean(fileId))),
   );
@@ -108,6 +113,7 @@ export default async function ProjectDetailsPage({
           {[
             ["Overview", "#overview"],
             ["Documents", "#documents"],
+            ["Systems", "#systems"],
             ["BOQ", "#boq"],
           ].map(([label, href], index) => (
             <a
@@ -215,11 +221,15 @@ export default async function ProjectDetailsPage({
           />
         </section>
 
+        <section className="mt-6 scroll-mt-24" id="systems">
+          <ProjectSystemsPanel projectId={project.id} systems={systems} />
+        </section>
+
         <section className="mt-6 scroll-mt-24" id="boq">
           <BoqResultsTable items={boqItems} learningRecords={learningRecords} showClassification={false} />
           {showBoqError ? (
             <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 font-mono text-xs text-red-800">
-              {boqErrorMessage || learningErrorMessage}
+              {boqErrorMessage || learningErrorMessage || systemsErrorMessage}
             </p>
           ) : null}
         </section>

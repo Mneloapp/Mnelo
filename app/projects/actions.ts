@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import * as XLSX from "xlsx";
+import { classifyBoqSystem, normalizeTakeoffUnit } from "@/lib/classification";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { DocumentType } from "@/lib/data";
 
@@ -39,69 +40,6 @@ const rateHeaders = [
   "fiyat",
 ];
 const amountHeaders = ["amount", "total", "sum", "ჯამი", "თანხა", "სულ", "сумма", "итого", "toplam", "tutar"];
-const learningCategories = [
-  {
-    category: "HVAC",
-    subcategory: "Mechanical systems",
-    supplierType: "Specialist contractor",
-    keywords: ["ahu", "air handling", "duct", "diffuser", "fan coil", "hvac", "chiller", "ventilation"],
-  },
-  {
-    category: "Electrical",
-    subcategory: "Power and controls",
-    supplierType: "Electrical supplier",
-    keywords: ["cable", "switchgear", "panel", "lighting", "conduit", "generator", "transformer", "electrical"],
-  },
-  {
-    category: "Furniture",
-    subcategory: "Fixtures and furnishings",
-    supplierType: "Furniture supplier",
-    keywords: ["desk", "chair", "table", "cabinet", "furniture", "workstation", "sofa"],
-  },
-  {
-    category: "Medical Equipment",
-    subcategory: "Clinical equipment",
-    supplierType: "Medical equipment supplier",
-    keywords: ["medical", "clinical", "patient", "scanner", "bedhead", "laboratory", "hospital"],
-  },
-  {
-    category: "Industrial Equipment",
-    subcategory: "Plant and machinery",
-    supplierType: "Industrial equipment supplier",
-    keywords: ["machine", "compressor", "pump", "conveyor", "industrial", "motor", "tank", "valve"],
-  },
-  {
-    category: "Software",
-    subcategory: "Digital systems",
-    supplierType: "Software vendor",
-    keywords: ["software", "license", "platform", "subscription", "integration", "api", "dashboard"],
-  },
-  {
-    category: "Construction Materials",
-    subcategory: "Materials and finishes",
-    supplierType: "Materials supplier",
-    keywords: ["concrete", "steel", "cement", "timber", "block", "tile", "paint", "gypsum", "aggregate"],
-  },
-  {
-    category: "Renewable Energy",
-    subcategory: "Energy systems",
-    supplierType: "Energy systems supplier",
-    keywords: ["solar", "pv", "battery", "inverter", "renewable", "wind", "energy storage"],
-  },
-  {
-    category: "Logistics",
-    subcategory: "Freight and handling",
-    supplierType: "Logistics provider",
-    keywords: ["freight", "shipping", "delivery", "transport", "logistics", "warehouse", "customs"],
-  },
-  {
-    category: "Office Supplies",
-    subcategory: "Consumables",
-    supplierType: "Office supplier",
-    keywords: ["paper", "stationery", "printer", "toner", "office supplies", "folder"],
-  },
-] as const;
-
 type ParsedBoqRow = {
   description: string;
   quantity: number | null;
@@ -135,6 +73,16 @@ type ClassificationPrediction = {
 type BoqInsertMode = {
   fileColumns: "both" | "project_file_id" | "source_file_id" | "none";
   optionalColumns: "full" | "legacy";
+};
+
+type BoqClassificationRow = {
+  id: string;
+  description: string;
+  quantity: number | null;
+  unit: string | null;
+  amount?: number | null;
+  category?: string | null;
+  subcategory?: string | null;
 };
 
 export type ProjectDocumentActionResult = {
@@ -248,28 +196,13 @@ function uniqueColumnOptions(headers: unknown[]) {
 }
 
 function predictClassification(description: string): ClassificationPrediction {
-  const normalizedDescription = description.toLowerCase();
-  const match = learningCategories
-    .map((category) => ({
-      ...category,
-      matches: category.keywords.filter((keyword) => normalizedDescription.includes(keyword)).length,
-    }))
-    .sort((a, b) => b.matches - a.matches)[0];
-
-  if (!match?.matches) {
-    return {
-      predicted_category: "General",
-      predicted_subcategory: "Unclassified",
-      predicted_supplier_type: "General supplier",
-      confidence_score: 0.35,
-    };
-  }
+  const classification = classifyBoqSystem(description);
 
   return {
-    predicted_category: match.category,
-    predicted_subcategory: match.subcategory,
-    predicted_supplier_type: match.supplierType,
-    confidence_score: Math.min(0.95, 0.58 + match.matches * 0.12),
+    predicted_category: classification.systemName,
+    predicted_subcategory: classification.categoryName,
+    predicted_supplier_type: classification.supplierType,
+    confidence_score: classification.confidenceScore,
   };
 }
 
@@ -997,6 +930,274 @@ export async function parseExistingProjectFile(formData: FormData) {
 
   revalidatePath(`/projects/${projectId}`);
   return { ok: true, message: "BOQ parsed successfully." } satisfies ProjectDocumentActionResult;
+}
+
+async function getSystemReferenceMaps({
+  classifications,
+  projectId,
+  supabase,
+  userId,
+}: {
+  classifications: Array<{ categoryName: string; systemName: string }>;
+  projectId: string;
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+  userId: string;
+}) {
+  const systemNames = Array.from(new Set(classifications.map((classification) => classification.systemName)));
+  const systemIdsByName = new Map<string, string>();
+  const categoryIdsByKey = new Map<string, string>();
+
+  if (systemNames.length === 0) {
+    return { categoryIdsByKey, systemIdsByName };
+  }
+
+  const { data: systems, error: systemsError } = await supabase
+    .from("project_systems")
+    .upsert(
+      systemNames.map((name, index) => ({
+        name,
+        project_id: projectId,
+        sort_order: index,
+        user_id: userId,
+      })),
+      { onConflict: "project_id,name" },
+    )
+    .select("id, name");
+
+  if (systemsError || !systems) {
+    if (systemsError) {
+      console.error(`Failed upserting project systems: ${systemsError.message}`);
+    }
+
+    return { categoryIdsByKey, systemIdsByName };
+  }
+
+  for (const system of systems as Array<{ id: string; name: string }>) {
+    systemIdsByName.set(system.name, system.id);
+  }
+
+  const categoryRows = classifications
+    .map((classification) => {
+      const systemId = systemIdsByName.get(classification.systemName);
+
+      if (!systemId) {
+        return null;
+      }
+
+      return {
+        name: classification.categoryName,
+        project_id: projectId,
+        system_id: systemId,
+        user_id: userId,
+      };
+    })
+    .filter((row): row is { name: string; project_id: string; system_id: string; user_id: string } => Boolean(row));
+  const uniqueCategoryRows = Array.from(
+    new Map(categoryRows.map((row) => [`${row.system_id}:${row.name}`, row])).values(),
+  );
+
+  if (uniqueCategoryRows.length === 0) {
+    return { categoryIdsByKey, systemIdsByName };
+  }
+
+  const { data: categories, error: categoriesError } = await supabase
+    .from("project_system_categories")
+    .upsert(uniqueCategoryRows, { onConflict: "system_id,name" })
+    .select("id, name, system_id");
+
+  if (categoriesError || !categories) {
+    if (categoriesError) {
+      console.error(`Failed upserting project system categories: ${categoriesError.message}`);
+    }
+
+    return { categoryIdsByKey, systemIdsByName };
+  }
+
+  for (const category of categories as Array<{ id: string; name: string; system_id: string }>) {
+    categoryIdsByKey.set(`${category.system_id}:${category.name}`, category.id);
+  }
+
+  return { categoryIdsByKey, systemIdsByName };
+}
+
+async function updateBoqItemClassification({
+  categoryId,
+  classification,
+  row,
+  supabase,
+  systemId,
+}: {
+  categoryId?: string;
+  classification: ReturnType<typeof classifyBoqSystem>;
+  row: BoqClassificationRow;
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+  systemId?: string;
+}) {
+  const takeoffQuantity = row.quantity === null || row.quantity === undefined ? null : Number(row.quantity || 0);
+  const takeoffUnit = normalizeTakeoffUnit(row.unit);
+  const basePayload = {
+    category: classification.systemName,
+    confidence_score: classification.confidenceScore,
+    subcategory: classification.categoryName,
+  };
+  const updateAttempts: Array<Record<string, unknown>> = [
+    {
+      ...basePayload,
+      classification_confidence: classification.confidenceScore,
+      classification_status: "classified",
+      system_category_id: categoryId || null,
+      system_id: systemId || null,
+      takeoff_quantity: takeoffQuantity,
+      takeoff_unit: takeoffUnit,
+    },
+    {
+      ...basePayload,
+      classification_confidence: classification.confidenceScore,
+      classification_status: "classified",
+      takeoff_quantity: takeoffQuantity,
+      takeoff_unit: takeoffUnit,
+    },
+    basePayload,
+    {
+      category: classification.systemName,
+      subcategory: classification.categoryName,
+    },
+  ];
+  let lastError: string | null = null;
+
+  for (const payload of updateAttempts) {
+    const { error } = await supabase.from("boq_items").update(payload).eq("id", row.id);
+
+    if (!error) {
+      return null;
+    }
+
+    lastError = error.message;
+    const canRetrySchemaFallback =
+      error.message.includes("schema cache") ||
+      error.message.includes("classification_confidence") ||
+      error.message.includes("classification_status") ||
+      error.message.includes("system_category_id") ||
+      error.message.includes("system_id") ||
+      error.message.includes("takeoff_quantity") ||
+      error.message.includes("takeoff_unit") ||
+      error.message.includes("confidence_score");
+
+    if (!canRetrySchemaFallback) {
+      break;
+    }
+  }
+
+  return lastError || "Unable to update BOQ item classification.";
+}
+
+export async function classifyProjectBoqItems(formData: FormData) {
+  const projectId = readString(formData, "project_id");
+
+  if (!projectId) {
+    return { ok: false, error: "Missing project id." } satisfies ProjectDocumentActionResult;
+  }
+
+  const { supabase, user, error: userError } = await getAuthenticatedUser();
+
+  if (userError || !user) {
+    return { ok: false, error: "Sign in to classify BOQ items." } satisfies ProjectDocumentActionResult;
+  }
+
+  const { data: project, error: projectError } = await supabase
+    .from("projects")
+    .select("id")
+    .eq("id", projectId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (projectError || !project) {
+    return { ok: false, error: projectError?.message || "Project not found." } satisfies ProjectDocumentActionResult;
+  }
+
+  const boqResult = await supabase
+    .from("boq_items")
+    .select("id, description, quantity, unit, amount, category, subcategory")
+    .eq("project_id", projectId)
+    .eq("user_id", user.id);
+  let data: unknown[] | null = boqResult.data;
+  let error = boqResult.error;
+
+  if (
+    error &&
+    (error.message.includes("schema cache") ||
+      error.message.includes("amount") ||
+      error.message.includes("category") ||
+      error.message.includes("subcategory"))
+  ) {
+    const fallbackResult = await supabase
+      .from("boq_items")
+      .select("id, description, quantity, unit")
+      .eq("project_id", projectId)
+      .eq("user_id", user.id);
+
+    data = fallbackResult.data;
+    error = fallbackResult.error;
+  }
+
+  if (error) {
+    return { ok: false, error: error.message } satisfies ProjectDocumentActionResult;
+  }
+
+  const rows = (data || []) as BoqClassificationRow[];
+
+  if (rows.length === 0) {
+    return { ok: false, error: "No BOQ items found. Upload or parse a BOQ file first." } satisfies ProjectDocumentActionResult;
+  }
+
+  const classifications = rows.map((row) => classifyBoqSystem(row.description, row.category, row.subcategory));
+  const { categoryIdsByKey, systemIdsByName } = await getSystemReferenceMaps({
+    classifications,
+    projectId,
+    supabase,
+    userId: user.id,
+  });
+  let updatedCount = 0;
+  let firstError: string | null = null;
+
+  for (const [index, row] of rows.entries()) {
+    const classification = classifications[index];
+    const systemId = systemIdsByName.get(classification.systemName);
+    const categoryId = systemId ? categoryIdsByKey.get(`${systemId}:${classification.categoryName}`) : undefined;
+    const updateError = await updateBoqItemClassification({
+      categoryId,
+      classification,
+      row,
+      supabase,
+      systemId,
+    });
+
+    if (updateError) {
+      firstError ||= updateError;
+      continue;
+    }
+
+    updatedCount += 1;
+  }
+
+  if (updatedCount === 0) {
+    return {
+      ok: false,
+      error: firstError || "Classification did not update any BOQ items.",
+    } satisfies ProjectDocumentActionResult;
+  }
+
+  revalidatePath(`/projects/${projectId}`);
+  revalidatePath("/boq");
+  revalidatePath("/learning");
+
+  return {
+    ok: true,
+    message:
+      updatedCount === rows.length
+        ? `Classified ${updatedCount} BOQ items into systems.`
+        : `Classified ${updatedCount} of ${rows.length} BOQ items. ${firstError || ""}`.trim(),
+  } satisfies ProjectDocumentActionResult;
 }
 
 export async function correctBoqClassification(formData: FormData) {
