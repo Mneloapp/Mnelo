@@ -2,17 +2,27 @@ import { notFound } from "next/navigation";
 import { AppNav } from "@/components/app-nav";
 import { Badge, Button, Shell, StatCard } from "@/components/ui";
 import { BoqResultsTable } from "@/components/boq-results-table";
-import { getProjectForCurrentUser } from "@/lib/data";
+import { uploadProjectDocument } from "@/app/projects/actions";
+import { getProjectFilesForCurrentUser, getProjectForCurrentUser } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
 
 export default async function ProjectDetailsPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ error?: string }>;
 }) {
   const { id } = await params;
-  const { project, errorMessage } = await getProjectForCurrentUser(id);
+  const [{ error }, projectResult, fileResult] = await Promise.all([
+    searchParams,
+    getProjectForCurrentUser(id),
+    getProjectFilesForCurrentUser(id),
+  ]);
+  const { project, errorMessage } = projectResult;
+  const { files, errorMessage: filesErrorMessage } = fileResult;
+  const showFilesError = process.env.NODE_ENV === "development" && filesErrorMessage;
 
   if (!project) {
     if (errorMessage) {
@@ -108,6 +118,94 @@ export default async function ProjectDetailsPage({
               </div>
             ))}
           </div>
+        </div>
+      </section>
+
+      <section className="mb-6 rounded-xl border border-line bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-2 border-b border-line pb-4 md:flex-row md:items-end md:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold tracking-tight text-ink">Upload Documents</h2>
+            <p className="mt-1 text-sm text-ink/55">
+              Upload BOQ spreadsheets, specifications, drawings, and tender PDFs. Parsing comes later.
+            </p>
+          </div>
+          <Badge tone="neutral">.xlsx · .xls · .pdf</Badge>
+        </div>
+
+        {error ? (
+          <div className="mt-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+            {error}
+          </div>
+        ) : null}
+
+        <form action={uploadProjectDocument} className="mt-5 grid gap-4 lg:grid-cols-[1fr_14rem_auto]">
+          <input name="project_id" type="hidden" value={project.id} />
+          <label className="block">
+            <span className="text-sm font-medium text-ink/70">Document file</span>
+            <input
+              accept=".xlsx,.xls,.pdf"
+              className="mt-2 block h-11 w-full rounded-lg border border-line bg-white px-3 py-2 text-sm file:mr-4 file:rounded-md file:border-0 file:bg-ink file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-white hover:file:bg-leaf-900"
+              name="file"
+              required
+              type="file"
+            />
+          </label>
+          <label className="block">
+            <span className="text-sm font-medium text-ink/70">Document type</span>
+            <select
+              className="mt-2 h-11 w-full rounded-lg border border-line bg-white px-3 text-sm outline-none transition focus:border-leaf-400 focus:ring-4 focus:ring-leaf-100"
+              name="document_type"
+            >
+              <option>BOQ Excel</option>
+              <option>Specification PDF</option>
+              <option>Drawing PDF</option>
+              <option>Other</option>
+            </select>
+          </label>
+          <div className="flex items-end">
+            <button
+              className="inline-flex h-11 w-full items-center justify-center rounded-lg bg-ink px-4 text-sm font-semibold text-white shadow-soft transition hover:bg-leaf-900 lg:w-auto"
+              type="submit"
+            >
+              Upload
+            </button>
+          </div>
+        </form>
+
+        <div className="mt-6">
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-ink/45">Uploaded files</h3>
+          {files.length > 0 ? (
+            <div className="mt-3 overflow-hidden rounded-xl border border-line">
+              <div className="divide-y divide-line">
+                {files.map((file) => (
+                  <div
+                    className="grid gap-3 bg-white px-4 py-3 text-sm md:grid-cols-[1fr_10rem_7rem_9rem]"
+                    key={file.id}
+                  >
+                    <div>
+                      <p className="font-medium text-ink">{file.fileName}</p>
+                      <p className="mt-1 font-mono text-xs text-ink/40">{file.storagePath}</p>
+                    </div>
+                    <p className="text-ink/65">{file.documentType}</p>
+                    <p className="text-ink/65">{file.fileSize}</p>
+                    <p className="text-ink/55">{file.uploadedAt}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="mt-3 rounded-xl border border-dashed border-line bg-mist/50 p-6 text-center">
+              <p className="font-medium text-ink">No documents uploaded yet</p>
+              <p className="mt-2 text-sm text-ink/55">
+                Upload BOQ Excel files, specification PDFs, or drawing PDFs to start organizing project inputs.
+              </p>
+              {showFilesError ? (
+                <p className="mx-auto mt-4 max-w-2xl rounded-lg border border-red-200 bg-red-50 px-3 py-2 font-mono text-xs text-red-800">
+                  {filesErrorMessage}
+                </p>
+              ) : null}
+            </div>
+          )}
         </div>
       </section>
 

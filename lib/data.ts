@@ -50,6 +50,30 @@ export type Project = {
   boq: BoqItem[];
 };
 
+export type ProjectFileRow = {
+  id: string;
+  project_id: string;
+  user_id: string;
+  file_name: string;
+  file_type: string;
+  file_size: number;
+  storage_path: string;
+  document_type: DocumentType;
+  uploaded_at: string;
+};
+
+export type ProjectFile = {
+  id: string;
+  fileName: string;
+  fileType: string;
+  fileSize: string;
+  storagePath: string;
+  documentType: DocumentType;
+  uploadedAt: string;
+};
+
+export type DocumentType = "BOQ Excel" | "Specification PDF" | "Drawing PDF" | "Other";
+
 export type ProjectsQueryResult = {
   projects: Project[];
   errorMessage: string | null;
@@ -57,6 +81,11 @@ export type ProjectsQueryResult = {
 
 export type ProjectQueryResult = {
   project: Project | null;
+  errorMessage: string | null;
+};
+
+export type ProjectFilesQueryResult = {
+  files: ProjectFile[];
   errorMessage: string | null;
 };
 
@@ -131,6 +160,20 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
+function formatFileSize(bytes: number) {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+
+  const kilobytes = bytes / 1024;
+
+  if (kilobytes < 1024) {
+    return `${kilobytes.toFixed(1)} KB`;
+  }
+
+  return `${(kilobytes / 1024).toFixed(1)} MB`;
+}
+
 export function mapProject(row: ProjectRow): Project {
   const contractValue = Number(row.contract_value || 0);
 
@@ -150,6 +193,18 @@ export function mapProject(row: ProjectRow): Project {
     notes: row.notes || "",
     risk: row.risk,
     boq: sampleBoq,
+  };
+}
+
+export function mapProjectFile(row: ProjectFileRow): ProjectFile {
+  return {
+    id: row.id,
+    fileName: row.file_name,
+    fileType: row.file_type,
+    fileSize: formatFileSize(row.file_size),
+    storagePath: row.storage_path,
+    documentType: row.document_type,
+    uploadedAt: formatDate(row.uploaded_at),
   };
 }
 
@@ -226,4 +281,35 @@ export async function getProjectForCurrentUser(id: string) {
     project: data ? mapProject(data as ProjectRow) : null,
     errorMessage: null,
   } satisfies ProjectQueryResult;
+}
+
+export async function getProjectFilesForCurrentUser(projectId: string) {
+  const userId = await getAuthenticatedUserId();
+
+  if (!userId) {
+    return {
+      files: [],
+      errorMessage: null,
+    } satisfies ProjectFilesQueryResult;
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("project_files")
+    .select("*")
+    .eq("project_id", projectId)
+    .eq("user_id", userId)
+    .order("uploaded_at", { ascending: false });
+
+  if (error) {
+    return {
+      files: [],
+      errorMessage: error.message,
+    } satisfies ProjectFilesQueryResult;
+  }
+
+  return {
+    files: (data as ProjectFileRow[]).map(mapProjectFile),
+    errorMessage: null,
+  } satisfies ProjectFilesQueryResult;
 }
