@@ -1,0 +1,24 @@
+<svg width="96" height="96" viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="mnelo-mark-stroke" x1="19" y1="24" x2="77" y2="74" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#16A34A"/>
+      <stop offset="1" stop-color="#A3E635"/>
+    </linearGradient>
+    <radialGradient id="mnelo-node-left" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(23 24) rotate(45) scale(22)">
+      <stop stop-color="#22C55E"/>
+      <stop offset="1" stop-color="#047857"/>
+    </radialGradient>
+    <radialGradient id="mnelo-node-right" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(73 24) rotate(45) scale(22)">
+      <stop stop-color="#BEF264"/>
+      <stop offset="1" stop-color="#65A30D"/>
+    </radialGradient>
+    <radialGradient id="mnelo-node-bottom" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(48 72) rotate(45) scale(24)">
+      <stop stop-color="#4ADE80"/>
+      <stop offset="1" stop-color="#16A34A"/>
+    </radialGradient>
+  </defs>
+  <path d="M23 24H73L48 72L23 24Z" stroke="url(#mnelo-mark-stroke)" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="23" cy="24" r="13" fill="url(#mnelo-node-left)"/>
+  <circle cx="73" cy="24" r="13" fill="url(#mnelo-node-right)"/>
+  <circle cx="48" cy="72" r="13" fill="url(#mnelo-node-bottom)"/>
+</svg>

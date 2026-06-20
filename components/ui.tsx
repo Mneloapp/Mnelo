@@ -1,13 +1,11 @@
 import Link from "next/link";
 import { clsx } from "clsx";
+import { MneloLogo } from "@/components/MneloLogo";
 
 export function Logo() {
   return (
     <Link href="/" className="flex items-center gap-2 text-sm font-semibold tracking-tight text-ink">
-      <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-ink text-sm font-bold text-white">
-        M
-      </span>
-      <span>Mnelo</span>
+      <MneloLogo className="[&_svg]:h-8 [&_svg]:w-8 [&_span]:text-base" />
     </Link>
   );
 }

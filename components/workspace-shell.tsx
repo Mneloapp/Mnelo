@@ -1,12 +1,14 @@
 import Link from "next/link";
+import { Files, FolderKanban, Settings, TableProperties } from "lucide-react";
 import { logout } from "@/app/auth/actions";
+import { MneloLogo } from "@/components/MneloLogo";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 const sidebarItems = [
-  { label: "Projects", href: "/dashboard", icon: "P" },
-  { label: "Files", href: "#documents", icon: "F" },
-  { label: "BOQ", href: "#boq", icon: "B" },
-  { label: "Settings", href: "/health", icon: "S" },
+  { label: "Projects", href: "/dashboard", icon: FolderKanban },
+  { label: "Files", href: "#documents", icon: Files },
+  { label: "BOQ", href: "#boq", icon: TableProperties },
+  { label: "Settings", href: "/health", icon: Settings },
 ];
 
 async function getUserEmail() {
@@ -36,15 +38,13 @@ export async function WorkspaceShell({
     <main className="min-h-screen bg-[#f8faf8] text-[#0b1712]">
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-[#e5e7eb] bg-white/92 px-5 py-6 shadow-[16px_0_60px_rgba(15,61,46,0.04)] backdrop-blur lg:flex">
         <Link href="/dashboard" className="flex items-center gap-3">
-          <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#16a34a] text-sm font-black text-white shadow-sm">
-            M
-          </span>
-          <span className="text-2xl font-semibold tracking-tight text-[#07130f]">Mnelo</span>
+          <MneloLogo />
         </Link>
 
         <nav className="mt-10 space-y-2">
           {sidebarItems.map((item) => {
             const isActive = item.label === active;
+            const Icon = item.icon;
 
             return (
               <Link
@@ -56,7 +56,7 @@ export async function WorkspaceShell({
                 href={item.href}
                 key={item.label}
               >
-                <span className="grid h-5 w-5 place-items-center text-xs">{item.icon}</span>
+                <Icon aria-hidden="true" className="h-5 w-5" strokeWidth={2} />
                 {item.label}
               </Link>
             );
@@ -80,10 +80,7 @@ export async function WorkspaceShell({
       <div className="lg:pl-64">
         <div className="sticky top-0 z-20 flex items-center justify-between border-b border-[#e5e7eb] bg-white/88 px-4 py-3 backdrop-blur lg:hidden">
           <Link href="/dashboard" className="flex items-center gap-2 text-lg font-semibold">
-            <span className="grid h-8 w-8 place-items-center rounded-lg bg-[#16a34a] text-xs font-black text-white">
-              M
-            </span>
-            Mnelo
+            <MneloLogo className="[&_svg]:h-8 [&_svg]:w-8 [&_span]:text-xl" />
           </Link>
           <div className="grid h-9 w-9 place-items-center rounded-full bg-[#dcfce7] text-xs font-bold text-[#087a36]">
             {initials}

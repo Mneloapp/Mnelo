@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { Plus } from "lucide-react";
 import { BoqResultsTable } from "@/components/boq-results-table";
 import { ProjectDocumentsPanel } from "@/components/project-documents-panel";
 import { WorkspaceShell } from "@/components/workspace-shell";
@@ -98,7 +99,8 @@ export default async function ProjectDetailsPage({
             className="inline-flex h-11 items-center justify-center rounded-xl bg-[#16a34a] px-5 text-sm font-semibold text-white shadow-[0_12px_28px_rgba(22,163,74,0.24)] transition hover:bg-[#087a36]"
             href="/projects/new"
           >
-            + New Project
+            <Plus aria-hidden="true" className="mr-2 h-4 w-4" strokeWidth={2} />
+            New Project
           </Link>
         </header>
 

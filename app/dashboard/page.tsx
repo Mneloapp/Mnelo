@@ -1,13 +1,25 @@
 import Link from "next/link";
+import {
+  Database,
+  FileText,
+  FileUp,
+  FolderKanban,
+  type LucideIcon,
+  Plus,
+  Search,
+  TableProperties,
+} from "lucide-react";
 import { WorkspaceShell } from "@/components/workspace-shell";
 import { getDashboardForCurrentUser } from "@/lib/data";
 
 function MetricCard({
   detail,
+  icon: Icon,
   label,
   value,
 }: {
   detail: string;
+  icon: LucideIcon;
   label: string;
   value: string;
 }) {
@@ -15,7 +27,7 @@ function MetricCard({
     <div className="rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-[0_18px_50px_rgba(15,23,42,0.04)]">
       <div className="flex items-start gap-4">
         <div className="grid h-11 w-11 place-items-center rounded-xl bg-[#ecfdf3] text-sm font-black text-[#16a34a]">
-          {label.charAt(0)}
+          <Icon aria-hidden="true" className="h-6 w-6" strokeWidth={2} />
         </div>
         <div>
           <p className="text-sm font-medium text-slate-500">{label}</p>
@@ -45,15 +57,18 @@ export default async function DashboardPage() {
                 className="h-11 w-full rounded-xl border border-[#e5e7eb] bg-white px-4 pl-10 text-sm outline-none transition placeholder:text-slate-400 focus:border-[#16a34a] focus:ring-4 focus:ring-[#dcfce7] sm:w-80"
                 placeholder="Search projects, files, BOQ..."
               />
-              <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-sm text-slate-400">
-                /
-              </span>
+              <Search
+                aria-hidden="true"
+                className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+                strokeWidth={2}
+              />
             </div>
             <Link
               className="inline-flex h-11 items-center justify-center rounded-xl bg-[#16a34a] px-5 text-sm font-semibold text-white shadow-[0_12px_28px_rgba(22,163,74,0.24)] transition hover:bg-[#087a36]"
               href="/projects/new"
             >
-              + New Project
+              <Plus aria-hidden="true" className="mr-2 h-4 w-4" strokeWidth={2} />
+              New Project
             </Link>
           </div>
         </header>
@@ -65,10 +80,20 @@ export default async function DashboardPage() {
         ) : null}
 
         <section className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <MetricCard detail="Loaded from Supabase" label="Total Projects" value={String(summary.totalProjects)} />
-          <MetricCard detail="Parsed line items" label="BOQ Items" value={summary.boqItems.toLocaleString()} />
-          <MetricCard detail="Uploaded documents" label="Files" value={String(summary.files)} />
-          <MetricCard detail="Across project documents" label="Storage Used" value={summary.storageUsed} />
+          <MetricCard
+            detail="Loaded from Supabase"
+            icon={FolderKanban}
+            label="Total Projects"
+            value={String(summary.totalProjects)}
+          />
+          <MetricCard
+            detail="Parsed line items"
+            icon={TableProperties}
+            label="BOQ Items"
+            value={summary.boqItems.toLocaleString()}
+          />
+          <MetricCard detail="Uploaded documents" icon={FileText} label="Files" value={String(summary.files)} />
+          <MetricCard detail="Across project documents" icon={Database} label="Storage Used" value={summary.storageUsed} />
         </section>
 
         <section className="mt-6 grid gap-6 xl:grid-cols-[1fr_22rem]">
@@ -101,7 +126,7 @@ export default async function DashboardPage() {
                         <td className="px-5 py-4">
                           <Link href={`/projects/${project.id}`} className="group flex items-center gap-3">
                             <span className="grid h-11 w-11 place-items-center rounded-xl bg-[#ecfdf3] text-sm font-bold text-[#087a36]">
-                              {project.name.slice(0, 1).toUpperCase()}
+                              <FolderKanban aria-hidden="true" className="h-5 w-5" strokeWidth={2} />
                             </span>
                             <span>
                               <span className="block font-semibold text-[#07130f] group-hover:text-[#087a36]">
@@ -141,7 +166,8 @@ export default async function DashboardPage() {
                   className="mt-5 inline-flex h-10 items-center justify-center rounded-xl bg-[#16a34a] px-4 text-sm font-semibold text-white"
                   href="/projects/new"
                 >
-                  + New Project
+                  <Plus aria-hidden="true" className="mr-2 h-4 w-4" strokeWidth={2} />
+                  New Project
                 </Link>
               </div>
             )}
@@ -158,7 +184,7 @@ export default async function DashboardPage() {
                     key={activity.id}
                   >
                     <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#ecfdf3] text-xs font-bold text-[#16a34a]">
-                      F
+                      <FileUp aria-hidden="true" className="h-5 w-5" strokeWidth={2} />
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-semibold text-[#07130f]">{activity.fileName}</span>
