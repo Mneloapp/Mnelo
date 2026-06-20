@@ -558,7 +558,6 @@ export async function correctBoqClassification(formData: FormData) {
 export async function deleteProjectFile(formData: FormData) {
   const projectId = readString(formData, "project_id");
   const fileId = readString(formData, "file_id");
-  const confirmed = readString(formData, "confirmed") === "true";
 
   if (!projectId || !fileId) {
     return { ok: false, error: "Missing file deletion details." } satisfies ProjectDocumentActionResult;
@@ -582,21 +581,6 @@ export async function deleteProjectFile(formData: FormData) {
     return { ok: false, error: fileError?.message || "File not found." } satisfies ProjectDocumentActionResult;
   }
 
-  const { count: parsedCount, error: countError } = await supabase
-    .from("boq_items")
-    .select("id", { count: "exact", head: true })
-    .eq("project_id", projectId)
-    .eq("user_id", user.id)
-    .or(`source_file_id.eq.${fileId},project_file_id.eq.${fileId}`);
-
-  if (countError) {
-    return deleteStepError("checking parsed BOQ data", countError.message);
-  }
-
-  if ((parsedCount || 0) > 0 && !confirmed) {
-    return { ok: false, error: "Delete file and all parsed BOQ data?" } satisfies ProjectDocumentActionResult;
-  }
-
   const { error: boqError } = await supabase
     .from("boq_items")
     .delete()
@@ -605,7 +589,7 @@ export async function deleteProjectFile(formData: FormData) {
     .or(`source_file_id.eq.${fileId},project_file_id.eq.${fileId}`);
 
   if (boqError) {
-    return deleteStepError("deleting boq_items", boqError.message);
+    console.error(`Failed deleting boq_items: ${boqError.message}`);
   }
 
   const { error: fileDeleteError } = await supabase

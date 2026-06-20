@@ -176,7 +176,6 @@ export function ProjectDocumentsPanel({
                             const formData = new FormData();
                             formData.set("project_id", projectId);
                             formData.set("file_id", file.id);
-                            formData.set("confirmed", hasParsedBoq ? "true" : "false");
 
                             const result = await deleteProjectFile(formData);
                             const ok = await handleResult(result, "File deleted successfully.");
