@@ -171,7 +171,7 @@ export function mapProject(row: ProjectRow): Project {
     value: formatCurrency(contractValue),
     progress: row.progress,
     drawings: row.drawings,
-    workType: row.work_type || row.trade || "MEP",
+    workType: row.work_type || row.trade || "General",
     notes: row.notes || "",
     risk: row.risk,
   };

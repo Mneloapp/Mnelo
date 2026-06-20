@@ -18,7 +18,7 @@ export default async function LoginPage({
         <div>
           <h1 className="text-3xl font-semibold tracking-tight text-ink">Welcome back</h1>
           <p className="mt-2 text-sm text-ink/55">
-            Sign in to continue estimating, validating, and procuring MEP scopes with Mnelo.
+            Sign in to continue estimating, validating, and procuring project scopes with Mnelo.
           </p>
         </div>
 

@@ -1,7 +1,7 @@
 
 # Mnelo
 
-Mnelo is a premium SaaS interface for an AI workforce focused on MEP estimation and procurement.
+Mnelo is a premium SaaS interface for an AI workspace focused on estimation and procurement across industries.
 
 ## Stack
 
@@ -23,4 +23,3 @@ Mnelo is a premium SaaS interface for an AI workforce focused on MEP estimation 
 ```bash
 npm install
 npm run dev
-

@@ -17,7 +17,7 @@ export default async function NewProjectPage({
           <p className="text-sm font-medium text-ink/55">New project</p>
           <h1 className="mt-3 text-4xl font-semibold tracking-tight text-ink">Create Project</h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-ink/58">
-            Capture the basic project intake details. Mnelo will generate estimate and procurement fields later.
+            Capture the basic project intake details for any estimate, tender, procurement package, or sourcing workflow.
           </p>
         </div>
         <Button href="/projects" variant="secondary">
@@ -38,7 +38,7 @@ export default async function NewProjectPage({
             <input
               className="mt-2 h-11 w-full rounded-lg border border-line bg-white px-3 text-sm outline-none transition placeholder:text-ink/30 focus:border-leaf-400 focus:ring-4 focus:ring-leaf-100"
               name="name"
-              placeholder="Downtown Medical Center"
+              placeholder="Regional Expansion Package"
               required
             />
           </label>
@@ -47,7 +47,7 @@ export default async function NewProjectPage({
             <input
               className="mt-2 h-11 w-full rounded-lg border border-line bg-white px-3 text-sm outline-none transition placeholder:text-ink/30 focus:border-leaf-400 focus:ring-4 focus:ring-leaf-100"
               name="client"
-              placeholder="Helio Health Group"
+              placeholder="Northstar Group"
               required
             />
           </label>
@@ -61,11 +61,11 @@ export default async function NewProjectPage({
             />
           </label>
           <label className="block">
-            <span className="text-sm font-medium text-ink/70">Work type</span>
+            <span className="text-sm font-medium text-ink/70">Industry / Work type</span>
             <input
               className="mt-2 h-11 w-full rounded-lg border border-line bg-white px-3 text-sm outline-none transition placeholder:text-ink/30 focus:border-leaf-400 focus:ring-4 focus:ring-leaf-100"
               name="work_type"
-              placeholder="MEP estimate"
+              placeholder="Construction, manufacturing, energy, facilities..."
               required
             />
           </label>
@@ -75,7 +75,6 @@ export default async function NewProjectPage({
               className="mt-2 min-h-28 w-full rounded-lg border border-line bg-white px-3 py-3 text-sm outline-none transition placeholder:text-ink/30 focus:border-leaf-400 focus:ring-4 focus:ring-leaf-100"
               name="notes"
               placeholder="Project context, scope notes, or procurement instructions"
-              required
             />
           </label>
           <div className="flex flex-col gap-3 sm:flex-row">

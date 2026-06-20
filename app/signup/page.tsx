@@ -18,7 +18,7 @@ export default async function SignupPage({
         <div>
           <h1 className="text-3xl font-semibold tracking-tight text-ink">Create your account</h1>
           <p className="mt-2 text-sm text-ink/55">
-            Start your Mnelo workspace for AI-assisted MEP estimation and procurement.
+            Start your Mnelo workspace for AI-assisted estimation and procurement.
           </p>
         </div>
 

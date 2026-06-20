@@ -26,7 +26,7 @@ export default async function ProjectsPage() {
         ) : (
           <div className="rounded-2xl border border-dashed border-line bg-white p-10 text-center shadow-sm">
             <Badge tone="neutral">No projects yet</Badge>
-            <h2 className="mt-4 text-2xl font-semibold tracking-tight text-ink">Create your first MEP estimate</h2>
+            <h2 className="mt-4 text-2xl font-semibold tracking-tight text-ink">Create your first estimate</h2>
             <p className="mx-auto mt-3 max-w-lg text-sm leading-6 text-ink/58">
               Projects you create are stored in Supabase and scoped to your logged-in user account.
             </p>

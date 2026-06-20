@@ -79,20 +79,20 @@ export default async function ProjectDetailsPage({
 
       <section className="grid gap-4 md:grid-cols-4">
         <StatCard label="Contract value" value={project.value} detail={`${project.workType} package`} />
-        <StatCard label="Drawings" value={String(project.drawings)} detail="Parsed and indexed" />
+        <StatCard label="Documents" value={String(project.drawings)} detail="Parsed and indexed" />
         <StatCard label="Readiness" value={`${project.progress}%`} detail="Estimator approved" />
         <StatCard label="Risk" value={project.risk} detail="Based on scope deltas" />
       </section>
 
       <section className="my-6 grid gap-6 lg:grid-cols-[0.8fr_1fr]">
         <div className="rounded-xl border border-line bg-white p-5 shadow-sm">
-          <h2 className="text-lg font-semibold tracking-tight text-ink">AI workforce</h2>
+          <h2 className="text-lg font-semibold tracking-tight text-ink">AI workspace</h2>
           <div className="mt-4 space-y-3">
             {[
-              ["Project intake", project.notes || "Ready for drawings, scope notes, and procurement context."],
-              ["Takeoff agent", "Extracted mechanical and plumbing quantities from latest drawing set."],
-              ["Scope agent", "Matched specification sections against BOQ coverage."],
-              ["Procurement agent", "Mapped preferred suppliers and alternates for long-lead items."],
+              ["Project intake", project.notes || "Ready for BOQs, tender documents, scope notes, and procurement context."],
+              ["Quantity agent", "Extracted structured quantities from the latest BOQ workbook."],
+              ["Scope agent", "Matched tender requirements against BOQ coverage."],
+              ["Procurement agent", "Mapped supplier options, alternates, and RFQ context."],
             ].map(([title, copy]) => (
               <div key={title} className="rounded-lg bg-mist/60 p-4 ring-1 ring-line">
                 <p className="font-medium text-ink">{title}</p>

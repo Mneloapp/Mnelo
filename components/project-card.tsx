@@ -30,7 +30,7 @@ export function ProjectCard({ project }: { project: Project }) {
           <p className="mt-1 font-semibold text-ink">{project.location}</p>
         </div>
         <div>
-          <p className="text-ink/45">Work type</p>
+          <p className="text-ink/45">Industry / Work type</p>
           <p className="mt-1 font-semibold text-ink">{project.workType}</p>
         </div>
         <div>

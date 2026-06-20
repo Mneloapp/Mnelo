@@ -12,7 +12,7 @@ create table if not exists public.projects (
   drawings integer not null default 0 check (drawings >= 0),
   work_type text,
   notes text,
-  trade text not null default 'MEP',
+  trade text not null default 'General',
   risk text not null default 'Low' check (risk in ('Low', 'Medium', 'High')),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()

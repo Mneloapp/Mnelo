@@ -12,7 +12,7 @@ create table if not exists public.projects (
   drawings integer not null default 0,
   work_type text,
   notes text,
-  trade text not null default 'MEP',
+  trade text not null default 'General',
   risk text not null default 'Low',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -30,7 +30,7 @@ alter table public.projects
   add column if not exists drawings integer default 0,
   add column if not exists work_type text,
   add column if not exists notes text,
-  add column if not exists trade text default 'MEP',
+  add column if not exists trade text default 'General',
   add column if not exists risk text default 'Low',
   add column if not exists created_at timestamptz default now(),
   add column if not exists updated_at timestamptz default now();
@@ -44,7 +44,7 @@ set
   progress = coalesce(progress, 0),
   drawings = coalesce(drawings, 0),
   work_type = coalesce(nullif(work_type, ''), nullif(trade, '')),
-  trade = coalesce(nullif(trade, ''), 'MEP'),
+  trade = coalesce(nullif(trade, ''), 'General'),
   risk = coalesce(risk, 'Low'),
   created_at = coalesce(created_at, now()),
   updated_at = coalesce(updated_at, now());
@@ -62,7 +62,7 @@ alter table public.projects
   alter column progress set not null,
   alter column drawings set default 0,
   alter column drawings set not null,
-  alter column trade set default 'MEP',
+  alter column trade set default 'General',
   alter column trade set not null,
   alter column risk set default 'Low',
   alter column risk set not null,

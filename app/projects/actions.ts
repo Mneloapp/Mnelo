@@ -127,8 +127,8 @@ export async function createProject(formData: FormData) {
   const workType = readString(formData, "work_type");
   const notes = readString(formData, "notes");
 
-  if (!name || !client || !location || !workType || !notes) {
-    redirect("/projects/new?error=All%20project%20fields%20are%20required.");
+  if (!name || !client || !location || !workType) {
+    redirect("/projects/new?error=Project%20name%2C%20client%2C%20location%2C%20and%20industry%20%2F%20work%20type%20are%20required.");
   }
 
   const { supabase, user, error: userError } = await getAuthenticatedUser();

@@ -8,7 +8,7 @@ export default async function DashboardPage() {
   const { projects, errorMessage } = await getProjectsForCurrentUser();
   const showProjectError = process.env.NODE_ENV === "development" && errorMessage;
   const pipelineValue = projects.reduce((total, project) => total + project.contractValue, 0);
-  const drawingsProcessed = projects.reduce((total, project) => total + project.drawings, 0);
+  const documentsProcessed = projects.reduce((total, project) => total + project.drawings, 0);
   const averageReadiness =
     projects.length > 0
       ? Math.round(projects.reduce((total, project) => total + project.progress, 0) / projects.length)
@@ -21,7 +21,7 @@ export default async function DashboardPage() {
         <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>
             <Badge>Command center</Badge>
-            <h1 className="mt-4 text-4xl font-semibold tracking-tight text-ink">MEP estimation workspace</h1>
+            <h1 className="mt-4 text-4xl font-semibold tracking-tight text-ink">Estimation workspace</h1>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-ink/58">
               Monitor AI extraction, estimator review, procurement readiness, and project risk from one
               operational dashboard.
@@ -39,7 +39,7 @@ export default async function DashboardPage() {
           value={formatCurrency(pipelineValue)}
           detail={`${projects.length} active project${projects.length === 1 ? "" : "s"}`}
         />
-        <StatCard label="Drawings processed" value={String(drawingsProcessed)} detail="Loaded from Supabase" />
+        <StatCard label="Documents processed" value={String(documentsProcessed)} detail="Loaded from Supabase" />
         <StatCard label="Avg readiness" value={`${averageReadiness}%`} detail="Across your projects" />
         <StatCard
           label="Supplier packs"
@@ -72,7 +72,7 @@ export default async function DashboardPage() {
                   </p>
                 ) : null}
                 <div className="mt-5">
-                  <Button href="/projects#create-project">Create Project</Button>
+                  <Button href="/projects/new">Create Project</Button>
                 </div>
               </div>
             )}
@@ -83,9 +83,9 @@ export default async function DashboardPage() {
           <h2 className="text-lg font-semibold tracking-tight text-ink">Agent activity</h2>
           <div className="mt-4 space-y-4">
             {[
-              ["Scope validator", "Flagged 6 low-confidence fire protection items", "4 min ago"],
-              ["Quantity extractor", "Completed HVAC takeoff for Level 08", "18 min ago"],
-              ["Procurement drafter", "Prepared supplier pack for electrical feeders", "42 min ago"],
+              ["Scope validator", "Flagged 6 low-confidence tender items", "4 min ago"],
+              ["Quantity extractor", "Parsed latest BOQ workbook for estimator review", "18 min ago"],
+              ["Procurement drafter", "Prepared supplier package for requested quotes", "42 min ago"],
               ["Cost analyst", "Compared unit rates against historical projects", "1 hr ago"],
             ].map(([agent, activity, time]) => (
               <div key={agent} className="rounded-lg border border-line bg-mist/40 p-4">
