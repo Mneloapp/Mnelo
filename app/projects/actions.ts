@@ -85,6 +85,14 @@ type BoqClassificationRow = {
   subcategory?: string | null;
 };
 
+type LearnedClassification = {
+  item_description: string | null;
+  final_category: string | null;
+  final_subcategory: string | null;
+  user_corrected_category: string | null;
+  user_corrected_subcategory: string | null;
+};
+
 export type ProjectDocumentActionResult = {
   ok: boolean;
   message?: string;
@@ -204,6 +212,79 @@ function predictClassification(description: string): ClassificationPrediction {
     predicted_supplier_type: classification.supplierType,
     confidence_score: classification.confidenceScore,
   };
+}
+
+function descriptionTokens(description: string) {
+  return new Set(
+    description
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s]/gu, " ")
+      .split(/\s+/)
+      .filter((token) => token.length > 2),
+  );
+}
+
+function findLearnedClassification(description: string, learnedClassifications: LearnedClassification[]) {
+  const tokens = descriptionTokens(description);
+  let bestMatch: { score: number; systemName: string; categoryName: string } | null = null;
+
+  for (const learnedClassification of learnedClassifications) {
+    const learnedDescription = learnedClassification.item_description;
+    const systemName = learnedClassification.user_corrected_category || learnedClassification.final_category;
+    const categoryName = learnedClassification.user_corrected_subcategory || learnedClassification.final_subcategory;
+
+    if (!learnedDescription || !systemName || !categoryName) {
+      continue;
+    }
+
+    const learnedTokens = descriptionTokens(learnedDescription);
+    const intersection = Array.from(tokens).filter((token) => learnedTokens.has(token)).length;
+    const union = new Set([...Array.from(tokens), ...Array.from(learnedTokens)]).size;
+    const score = union > 0 ? intersection / union : 0;
+
+    if (
+      description.toLowerCase().includes(learnedDescription.toLowerCase()) ||
+      learnedDescription.toLowerCase().includes(description.toLowerCase())
+    ) {
+      bestMatch = { categoryName, score: 1, systemName };
+      continue;
+    }
+
+    if (!bestMatch || score > bestMatch.score) {
+      bestMatch = { categoryName, score, systemName };
+    }
+  }
+
+  if (!bestMatch || bestMatch.score < 0.42) {
+    return null;
+  }
+
+  return {
+    categoryName: bestMatch.categoryName,
+    confidenceScore: Math.min(0.92, 0.72 + bestMatch.score * 0.2),
+    supplierType: "Learned supplier",
+    systemName: bestMatch.systemName,
+  };
+}
+
+async function getLearnedClassifications(
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  userId: string,
+) {
+  const { data, error } = await supabase
+    .from("ai_training_data")
+    .select("item_description, final_category, final_subcategory, user_corrected_category, user_corrected_subcategory")
+    .eq("user_id", userId)
+    .not("item_description", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(500);
+
+  if (error) {
+    console.error(`Failed reading learned classifications: ${error.message}`);
+    return [];
+  }
+
+  return (data || []) as LearnedClassification[];
 }
 
 function selectHeaderMatch(rows: unknown[][], mapping?: ColumnMapping | null) {
@@ -1092,6 +1173,15 @@ async function updateBoqItemClassification({
 }
 
 export async function classifyProjectBoqItems(formData: FormData) {
+  try {
+    return await classifyProjectBoqItemsUnsafe(formData);
+  } catch (error) {
+    console.error(error);
+    return actionError(error, "Classification failed.");
+  }
+}
+
+async function classifyProjectBoqItemsUnsafe(formData: FormData) {
   const projectId = readString(formData, "project_id");
 
   if (!projectId) {
@@ -1150,7 +1240,10 @@ export async function classifyProjectBoqItems(formData: FormData) {
     return { ok: false, error: "No BOQ items found. Upload or parse a BOQ file first." } satisfies ProjectDocumentActionResult;
   }
 
-  const classifications = rows.map((row) => classifyBoqSystem(row.description, row.category, row.subcategory));
+  const learnedClassifications = await getLearnedClassifications(supabase, user.id);
+  const classifications = rows.map(
+    (row) => findLearnedClassification(row.description, learnedClassifications) || classifyBoqSystem(row.description, row.category, row.subcategory),
+  );
   const { categoryIdsByKey, systemIdsByName } = await getSystemReferenceMaps({
     classifications,
     projectId,
@@ -1198,6 +1291,102 @@ export async function classifyProjectBoqItems(formData: FormData) {
         ? `Classified ${updatedCount} BOQ items into systems.`
         : `Classified ${updatedCount} of ${rows.length} BOQ items. ${firstError || ""}`.trim(),
   } satisfies ProjectDocumentActionResult;
+}
+
+export async function correctBoqItemSystemClassification(formData: FormData) {
+  try {
+    const projectId = readString(formData, "project_id");
+    const itemId = readString(formData, "item_id");
+    const systemName = readString(formData, "system_name");
+    const categoryName = readString(formData, "category_name");
+
+    if (!projectId || !itemId || !systemName || !categoryName) {
+      return { ok: false, error: "Choose a system and category before saving." } satisfies ProjectDocumentActionResult;
+    }
+
+    const { supabase, user, error: userError } = await getAuthenticatedUser();
+
+    if (userError || !user) {
+      return { ok: false, error: "Sign in to classify BOQ items." } satisfies ProjectDocumentActionResult;
+    }
+
+    const { data: row, error: rowError } = await supabase
+      .from("boq_items")
+      .select("id, description, quantity, unit, amount, category, subcategory")
+      .eq("id", itemId)
+      .eq("project_id", projectId)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (rowError || !row) {
+      return { ok: false, error: rowError?.message || "BOQ item not found." } satisfies ProjectDocumentActionResult;
+    }
+
+    const classification = {
+      categoryName,
+      confidenceScore: 1,
+      supplierType: "User corrected supplier",
+      systemName,
+    };
+    const { categoryIdsByKey, systemIdsByName } = await getSystemReferenceMaps({
+      classifications: [classification],
+      projectId,
+      supabase,
+      userId: user.id,
+    });
+    const systemId = systemIdsByName.get(systemName);
+    const categoryId = systemId ? categoryIdsByKey.get(`${systemId}:${categoryName}`) : undefined;
+    const updateError = await updateBoqItemClassification({
+      categoryId,
+      classification,
+      row: row as BoqClassificationRow,
+      supabase,
+      systemId,
+    });
+
+    if (updateError) {
+      return { ok: false, error: updateError } satisfies ProjectDocumentActionResult;
+    }
+
+    const { error: learningError } = await supabase.from("ai_training_data").insert({
+      project_id: projectId,
+      user_id: user.id,
+      source_type: "system_classification_correction",
+      source_id: itemId,
+      item_description: (row as BoqClassificationRow).description,
+      predicted_category: (row as BoqClassificationRow).category || "General",
+      predicted_subcategory: (row as BoqClassificationRow).subcategory || "Unclassified",
+      predicted_supplier_type: "General supplier",
+      confidence_score: 1,
+      user_corrected_category: systemName,
+      user_corrected_subcategory: categoryName,
+      final_category: systemName,
+      final_subcategory: categoryName,
+      input: {
+        description: (row as BoqClassificationRow).description,
+        previous_category: (row as BoqClassificationRow).category,
+        previous_subcategory: (row as BoqClassificationRow).subcategory,
+      },
+      output: {
+        category: categoryName,
+        system: systemName,
+      },
+      feedback: "User system classification correction",
+    });
+
+    if (learningError) {
+      console.error(`Failed saving system classification learning record: ${learningError.message}`);
+    }
+
+    revalidatePath(`/projects/${projectId}`);
+    revalidatePath("/boq");
+    revalidatePath("/learning");
+
+    return { ok: true, message: "Classification saved and remembered for future matches." } satisfies ProjectDocumentActionResult;
+  } catch (error) {
+    console.error(error);
+    return actionError(error, "Classification correction failed.");
+  }
 }
 
 export async function correctBoqClassification(formData: FormData) {

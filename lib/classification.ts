@@ -12,7 +12,7 @@ type SystemRule = {
   keywords: string[];
 };
 
-const systemRules: SystemRule[] = [
+export const systemRules: SystemRule[] = [
   {
     systemName: "HVAC",
     categoryName: "Mechanical air systems",
@@ -112,6 +112,13 @@ const systemRules: SystemRule[] = [
 ];
 
 const knownSystemNames = new Set(systemRules.map((rule) => rule.systemName.toLowerCase()));
+
+export function getSystemRuleOptions() {
+  return systemRules.map((rule) => ({
+    categoryName: rule.categoryName,
+    systemName: rule.systemName,
+  }));
+}
 
 export function classifyBoqSystem(description: string, existingCategory?: string | null, existingSubcategory?: string | null) {
   const normalizedDescription = description.toLowerCase();
