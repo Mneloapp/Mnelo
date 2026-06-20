@@ -1,5 +1,5 @@
-import Link from "next/link";
-import { Badge, Button, Logo } from "@/components/ui";
+import { AppNav } from "@/components/app-nav";
+import { Badge, Button } from "@/components/ui";
 
 const features = [
   "Drawing takeoff automation",
@@ -12,22 +12,8 @@ export default function LandingPage() {
   return (
     <main className="relative overflow-hidden">
       <div className="grid-surface absolute inset-x-0 top-0 h-[42rem]" />
-      <header className="relative mx-auto flex max-w-7xl items-center justify-between px-4 py-5 sm:px-6 lg:px-8">
-        <Logo />
-        <nav className="hidden items-center gap-7 text-sm font-medium text-ink/60 md:flex">
-          <Link href="#platform" className="hover:text-ink">
-            Platform
-          </Link>
-          <Link href="/projects" className="hover:text-ink">
-            Projects
-          </Link>
-          <Link href="/dashboard" className="hover:text-ink">
-            Dashboard
-          </Link>
-        </nav>
-        <Button href="/login" variant="secondary">
-          Sign in
-        </Button>
+      <header className="relative mx-auto max-w-7xl px-4 py-5 sm:px-6 lg:px-8">
+        <AppNav className="mb-0" />
       </header>
 
       <section className="relative mx-auto grid min-h-[calc(100vh-5rem)] max-w-7xl items-center gap-12 px-4 py-14 sm:px-6 lg:grid-cols-[1fr_0.9fr] lg:px-8">
