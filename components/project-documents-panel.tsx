@@ -2,13 +2,18 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { deleteProjectFile, uploadProjectDocument } from "@/app/projects/actions";
+import { deleteProjectFile, saveBoqColumnMappingAndParse, uploadProjectDocument } from "@/app/projects/actions";
 import type { ProjectDocumentActionResult } from "@/app/projects/actions";
 import type { ProjectFile } from "@/lib/data";
 
 type Notice = {
   tone: "success" | "error";
   message: string;
+};
+
+type MappingRequest = {
+  columns: NonNullable<ProjectDocumentActionResult["mappingColumns"]>;
+  projectFileId: string;
 };
 
 export function ProjectDocumentsPanel({
@@ -34,7 +39,9 @@ export function ProjectDocumentsPanel({
         ? { tone: "success", message: initialMessage }
         : null,
   );
+  const [mappingRequest, setMappingRequest] = useState<MappingRequest | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [isSavingMapping, setIsSavingMapping] = useState(false);
   const [deletingFileId, setDeletingFileId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -85,9 +92,23 @@ export function ProjectDocumentsPanel({
           try {
             const formData = new FormData(event.currentTarget);
             const result = await uploadProjectDocument(formData);
+
+            if (!result.ok && result.needsMapping && result.projectFileId && result.mappingColumns) {
+              setMappingRequest({
+                columns: result.mappingColumns,
+                projectFileId: result.projectFileId,
+              });
+              setNotice({
+                tone: "error",
+                message: result.error || "Column detection confidence is low. Select BOQ columns manually.",
+              });
+              return;
+            }
+
             const ok = await handleResult(result, "File uploaded successfully.");
 
             if (ok) {
+              setMappingRequest(null);
               formRef.current?.reset();
             }
           } catch (error) {
@@ -137,6 +158,93 @@ export function ProjectDocumentsPanel({
           </button>
         </div>
       </form>
+
+      {mappingRequest ? (
+        <form
+          className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4"
+          onSubmit={async (event) => {
+            event.preventDefault();
+
+            if (isSavingMapping) {
+              return;
+            }
+
+            setIsSavingMapping(true);
+            setNotice(null);
+
+            try {
+              const formData = new FormData(event.currentTarget);
+              const result = await saveBoqColumnMappingAndParse(formData);
+              const ok = await handleResult(result, "Column mapping saved and BOQ parsed.");
+
+              if (ok) {
+                setMappingRequest(null);
+                formRef.current?.reset();
+              }
+            } catch (error) {
+              console.error(error);
+              setNotice({
+                tone: "error",
+                message: error instanceof Error ? error.message : "Unknown mapping error.",
+              });
+            } finally {
+              setIsSavingMapping(false);
+            }
+          }}
+        >
+          <input name="project_id" type="hidden" value={projectId} />
+          <input name="project_file_id" type="hidden" value={mappingRequest.projectFileId} />
+          <div className="flex flex-col gap-1">
+            <h3 className="text-sm font-semibold text-ink">Map BOQ columns</h3>
+            <p className="text-sm text-ink/60">
+              Detection confidence was low. Choose the matching columns once; Mnelo will reuse this mapping for future uploads in this project.
+            </p>
+          </div>
+          <div className="mt-4 grid gap-3 md:grid-cols-5">
+            {[
+              ["Description", "description_column", true],
+              ["Qty", "quantity_column", false],
+              ["Unit", "unit_column", false],
+              ["Rate", "rate_column", false],
+              ["Amount", "amount_column", false],
+            ].map(([label, name, required]) => (
+              <label className="block" key={String(name)}>
+                <span className="text-xs font-semibold uppercase tracking-wide text-ink/55">{label}</span>
+                <select
+                  className="mt-2 h-10 w-full rounded-lg border border-amber-200 bg-white px-2 text-sm outline-none transition focus:border-leaf-400 focus:ring-4 focus:ring-leaf-100 disabled:cursor-not-allowed disabled:opacity-55"
+                  disabled={isSavingMapping}
+                  name={String(name)}
+                  required={Boolean(required)}
+                >
+                  {!required ? <option value="">Not used</option> : null}
+                  {mappingRequest.columns.map((column) => (
+                    <option key={`${name}-${column.value}`} value={column.value}>
+                      {column.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ))}
+          </div>
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+            <button
+              className="inline-flex h-10 items-center justify-center rounded-lg bg-ink px-4 text-sm font-semibold text-white shadow-soft transition hover:bg-leaf-900 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={isSavingMapping}
+              type="submit"
+            >
+              {isSavingMapping ? "Saving mapping..." : "Save mapping and parse"}
+            </button>
+            <button
+              className="inline-flex h-10 items-center justify-center rounded-lg bg-white px-4 text-sm font-semibold text-ink ring-1 ring-amber-200 transition hover:bg-amber-100"
+              disabled={isSavingMapping}
+              onClick={() => setMappingRequest(null)}
+              type="button"
+            >
+              Dismiss
+            </button>
+          </div>
+        </form>
+      ) : null}
 
       <div className="mt-6">
         <h3 className="text-sm font-semibold uppercase tracking-wide text-ink/45">Uploaded files</h3>

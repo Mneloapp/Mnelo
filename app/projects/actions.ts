@@ -8,11 +8,37 @@ import type { DocumentType } from "@/lib/data";
 
 const documentTypes = ["BOQ Excel", "Specification PDF", "Drawing PDF", "Other"] satisfies DocumentType[];
 const allowedExtensions = [".xlsx", ".xls", ".pdf"];
-const descriptionHeaders = ["description", "desc", "item description", "item", "item name", "name", "scope", "work item"];
-const quantityHeaders = ["quantity", "qty", "q'ty", "qnty"];
-const unitHeaders = ["unit", "uom", "unit of measure", "units"];
-const rateHeaders = ["rate", "unit rate", "unit price", "price", "cost"];
-const amountHeaders = ["amount", "total", "total amount", "line total", "extended amount"];
+const descriptionHeaders = [
+  "description",
+  "item",
+  "name",
+  "scope",
+  "works",
+  "დასახელება",
+  "აღწერა",
+  "სამუშაო",
+  "სამუშაოს დასახელება",
+  "наименование",
+  "описание",
+  "работа",
+  "açıklama",
+  "kalem",
+  "iş tanımı",
+];
+const quantityHeaders = ["qty", "quantity", "count", "რაოდენობა", "რაოდ", "количество", "кол-во", "miktar", "adet"];
+const unitHeaders = ["unit", "uom", "ერთეული", "განზომილება", "единица", "ед. изм", "birim"];
+const rateHeaders = [
+  "rate",
+  "unit price",
+  "price",
+  "ერთეულის ფასი",
+  "ფასი",
+  "цена",
+  "цена за единицу",
+  "birim fiyat",
+  "fiyat",
+];
+const amountHeaders = ["amount", "total", "sum", "ჯამი", "თანხა", "სულ", "сумма", "итого", "toplam", "tutar"];
 const learningCategories = [
   {
     category: "HVAC",
@@ -86,6 +112,19 @@ type ParsedBoqRow = {
   row_number: number;
 };
 
+type ColumnMapping = {
+  description: string;
+  quantity: string | null;
+  unit: string | null;
+  rate: string | null;
+  amount: string | null;
+};
+
+type MappingColumnOption = {
+  label: string;
+  value: string;
+};
+
 type ClassificationPrediction = {
   predicted_category: string;
   predicted_subcategory: string;
@@ -97,7 +136,19 @@ export type ProjectDocumentActionResult = {
   ok: boolean;
   message?: string;
   error?: string;
+  needsMapping?: boolean;
+  mappingColumns?: MappingColumnOption[];
+  projectFileId?: string;
 };
+
+class MappingRequiredError extends Error {
+  columns: MappingColumnOption[];
+
+  constructor(columns: MappingColumnOption[]) {
+    super("Column detection confidence is low. Select BOQ columns manually.");
+    this.columns = columns;
+  }
+}
 
 function actionError(error: unknown, fallback: string): ProjectDocumentActionResult {
   return {
@@ -134,7 +185,7 @@ function normalizeHeader(value: unknown) {
   return String(value || "")
     .trim()
     .toLowerCase()
-    .replace(/[_/.-]+/g, " ")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
     .replace(/\s+/g, " ");
 }
 
@@ -147,6 +198,14 @@ function findColumn(headers: unknown[], names: string[]) {
       return normalizedHeader === normalizedName || normalizedHeader.includes(normalizedName);
     });
   });
+}
+
+function findMappedColumn(headers: unknown[], mappedHeader: string | null) {
+  if (!mappedHeader) {
+    return -1;
+  }
+
+  return headers.findIndex((header) => normalizeHeader(header) === mappedHeader);
 }
 
 function parseNumber(value: unknown) {
@@ -166,6 +225,21 @@ function parseNumber(value: unknown) {
 
 function cellText(value: unknown) {
   return String(value || "").trim();
+}
+
+function uniqueColumnOptions(headers: unknown[]) {
+  const options = new Map<string, MappingColumnOption>();
+
+  for (const header of headers) {
+    const label = cellText(header);
+    const value = normalizeHeader(header);
+
+    if (label && value && !options.has(value)) {
+      options.set(value, { label, value });
+    }
+  }
+
+  return Array.from(options.values());
 }
 
 function predictClassification(description: string): ClassificationPrediction {
@@ -194,76 +268,93 @@ function predictClassification(description: string): ClassificationPrediction {
   };
 }
 
-async function parseBoqWorkbook(file: File) {
-  let workbook: XLSX.WorkBook;
-  const parsedRows: ParsedBoqRow[] = [];
+function selectHeaderMatch(rows: unknown[][], mapping?: ColumnMapping | null) {
+  return rows.slice(0, 20).map((row, index) => {
+    const descriptionColumn =
+      mapping?.description ? findMappedColumn(row, mapping.description) : findColumn(row, descriptionHeaders);
+    const quantityColumn =
+      mapping?.quantity ? findMappedColumn(row, mapping.quantity) : findColumn(row, quantityHeaders);
+    const unitColumn = mapping?.unit ? findMappedColumn(row, mapping.unit) : findColumn(row, unitHeaders);
+    const rateColumn = mapping?.rate ? findMappedColumn(row, mapping.rate) : findColumn(row, rateHeaders);
+    const amountColumn = mapping?.amount ? findMappedColumn(row, mapping.amount) : findColumn(row, amountHeaders);
+    const score =
+      (descriptionColumn >= 0 ? 4 : 0) +
+      (quantityColumn >= 0 ? 2 : 0) +
+      (unitColumn >= 0 ? 1 : 0) +
+      (rateColumn >= 0 ? 1 : 0) +
+      (amountColumn >= 0 ? 1 : 0);
 
+    return {
+      index,
+      descriptionColumn,
+      quantityColumn,
+      unitColumn,
+      rateColumn,
+      amountColumn,
+      score,
+    };
+  }).sort((a, b) => b.score - a.score)[0];
+}
+
+async function readWorkbook(source: Blob) {
   try {
-    const buffer = await file.arrayBuffer();
-    workbook = XLSX.read(buffer, { cellDates: true, dense: false, type: "array" });
+    const buffer = await source.arrayBuffer();
+    return XLSX.read(buffer, { cellDates: true, dense: false, type: "array" });
   } catch (error) {
     throw new Error(error instanceof Error ? error.message : "Unable to read Excel workbook.");
   }
+}
+
+function getSheetRows(sheet: XLSX.WorkSheet) {
+  return XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+    blankrows: false,
+    defval: "",
+    header: 1,
+    raw: true,
+  });
+}
+
+function getMappingColumns(workbook: XLSX.WorkBook) {
+  for (const sheetName of workbook.SheetNames) {
+    const sheet = workbook.Sheets[sheetName];
+    const rows = getSheetRows(sheet);
+    const candidate = rows.slice(0, 20).find((row) => uniqueColumnOptions(row).length > 1);
+
+    if (candidate) {
+      return uniqueColumnOptions(candidate);
+    }
+  }
+
+  return [];
+}
+
+async function parseBoqWorkbook(source: Blob, mapping?: ColumnMapping | null) {
+  const workbook = await readWorkbook(source);
+  const parsedRows: ParsedBoqRow[] = [];
 
   if (workbook.SheetNames.length === 0) {
     throw new Error("Workbook has no sheets.");
   }
 
-
+  let bestScore = 0;
   for (const sheetName of workbook.SheetNames) {
     const sheet = workbook.Sheets[sheetName];
-    const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
-      blankrows: false,
-      defval: "",
-      header: 1,
-      raw: true,
-    });
-
-    const headerCandidates = rows.slice(0, 30).map((row, index) => {
-      const descriptionColumn = findColumn(row, descriptionHeaders);
-      const quantityColumn = findColumn(row, quantityHeaders);
-      const unitColumn = findColumn(row, unitHeaders);
-      const rateColumn = findColumn(row, rateHeaders);
-      const amountColumn = findColumn(row, amountHeaders);
-      const score =
-        (descriptionColumn >= 0 ? 4 : 0) +
-        (quantityColumn >= 0 ? 2 : 0) +
-        (unitColumn >= 0 ? 1 : 0) +
-        (rateColumn >= 0 ? 1 : 0) +
-        (amountColumn >= 0 ? 1 : 0);
-
-      return {
-        index,
-        descriptionColumn,
-        quantityColumn,
-        unitColumn,
-        rateColumn,
-        amountColumn,
-        score,
-      };
-    });
-    const headerMatch = headerCandidates
-      .filter((candidate) => candidate.descriptionColumn >= 0)
-      .sort((a, b) => b.score - a.score)[0];
+    const rows = getSheetRows(sheet);
+    const headerMatch = selectHeaderMatch(rows, mapping);
     const headerRowIndex = headerMatch?.index ?? -1;
 
-    if (headerRowIndex < 0) {
+    bestScore = Math.max(bestScore, headerMatch?.score || 0);
+
+    if (headerRowIndex < 0 || headerMatch.descriptionColumn < 0) {
       continue;
     }
 
-    const headers = rows[headerRowIndex];
-    const descriptionColumn = findColumn(headers, descriptionHeaders);
-    const quantityColumn = findColumn(headers, quantityHeaders);
-    const unitColumn = findColumn(headers, unitHeaders);
-    const rateColumn = findColumn(headers, rateHeaders);
-    const amountColumn = findColumn(headers, amountHeaders);
-
     for (const [index, row] of rows.slice(headerRowIndex + 1).entries()) {
-      const description = cellText(row[descriptionColumn]);
-      const quantity = quantityColumn >= 0 ? parseNumber(row[quantityColumn]) : null;
-      const unit = unitColumn >= 0 ? cellText(row[unitColumn]) || null : null;
-      const rate = rateColumn >= 0 ? parseNumber(row[rateColumn]) : null;
-      const amount = amountColumn >= 0 ? parseNumber(row[amountColumn]) : null;
+      const description = cellText(row[headerMatch.descriptionColumn]);
+      const quantity = headerMatch.quantityColumn >= 0 ? parseNumber(row[headerMatch.quantityColumn]) : null;
+      const unit = headerMatch.unitColumn >= 0 ? cellText(row[headerMatch.unitColumn]) || null : null;
+      const rate = headerMatch.rateColumn >= 0 ? parseNumber(row[headerMatch.rateColumn]) : null;
+      const amount = headerMatch.amountColumn >= 0 ? parseNumber(row[headerMatch.amountColumn]) : null;
 
       if (!description) {
         continue;
@@ -281,10 +372,16 @@ async function parseBoqWorkbook(file: File) {
     }
   }
 
+  if (!mapping && bestScore < 6) {
+    throw new MappingRequiredError(getMappingColumns(workbook));
+  }
+
   if (parsedRows.length === 0) {
-    throw new Error(
-      "No BOQ rows were parsed. Expected a header row with a description, item, or name column, plus optional quantity, unit, rate, or amount columns.",
-    );
+    if (mapping) {
+      throw new Error("No BOQ rows were parsed with the selected column mapping.");
+    }
+
+    throw new MappingRequiredError(getMappingColumns(workbook));
   }
 
   return parsedRows;
@@ -298,6 +395,110 @@ async function getAuthenticatedUser() {
   } = await supabase.auth.getUser();
 
   return { supabase, user, error };
+}
+
+async function getProjectColumnMapping(
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  projectId: string,
+  userId: string,
+) {
+  const { data, error } = await supabase
+    .from("project_boq_column_mappings")
+    .select("description_column, quantity_column, unit_column, rate_column, amount_column")
+    .eq("project_id", projectId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error || !data) {
+    return null;
+  }
+
+  return {
+    description: data.description_column,
+    quantity: data.quantity_column,
+    unit: data.unit_column,
+    rate: data.rate_column,
+    amount: data.amount_column,
+  } satisfies ColumnMapping;
+}
+
+async function saveParsedBoqRows({
+  projectFileId,
+  projectId,
+  rows,
+  supabase,
+  userId,
+}: {
+  projectFileId: string;
+  projectId: string;
+  rows: ParsedBoqRow[];
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+  userId: string;
+}) {
+  const { error: boqError } = await supabase.from("boq_items").insert(
+    rows.map((row) => {
+      const prediction = predictClassification(row.description);
+
+      return {
+        project_id: projectId,
+        project_file_id: projectFileId,
+        source_file_id: projectFileId,
+        user_id: userId,
+        description: row.description,
+        quantity: row.quantity,
+        unit: row.unit,
+        rate: row.rate,
+        amount: row.amount,
+        category: prediction.predicted_category,
+        subcategory: prediction.predicted_subcategory,
+        confidence_score: prediction.confidence_score,
+        sheet_name: row.sheet_name,
+        row_number: row.row_number,
+      };
+    }),
+  );
+
+  if (boqError) {
+    return boqError.message;
+  }
+
+  const { error: learningError } = await supabase.from("ai_training_data").insert(
+    rows.map((row) => {
+      const prediction = predictClassification(row.description);
+
+      return {
+        project_id: projectId,
+        source_file_id: projectFileId,
+        user_id: userId,
+        source_type: "boq_item",
+        source_id: projectFileId,
+        item_description: row.description,
+        predicted_category: prediction.predicted_category,
+        predicted_subcategory: prediction.predicted_subcategory,
+        predicted_supplier_type: prediction.predicted_supplier_type,
+        confidence_score: prediction.confidence_score,
+        final_category: prediction.predicted_category,
+        final_subcategory: prediction.predicted_subcategory,
+        input: {
+          description: row.description,
+          quantity: row.quantity,
+          unit: row.unit,
+          rate: row.rate,
+          amount: row.amount,
+          sheet_name: row.sheet_name,
+          row_number: row.row_number,
+        },
+        output: prediction,
+      };
+    }),
+  );
+
+  if (learningError) {
+    await supabase.from("boq_items").delete().eq("source_file_id", projectFileId).eq("user_id", userId);
+    return learningError.message;
+  }
+
+  return null;
 }
 
 export async function createProject(formData: FormData) {
@@ -409,81 +610,125 @@ export async function uploadProjectDocument(formData: FormData) {
 
   if (extension === ".xlsx" || extension === ".xls") {
     let rows: ParsedBoqRow[];
+    const savedMapping = await getProjectColumnMapping(supabase, projectId, user.id);
 
     try {
-      rows = await parseBoqWorkbook(file);
+      rows = await parseBoqWorkbook(file, savedMapping);
     } catch (error) {
+      if (error instanceof MappingRequiredError) {
+        return {
+          ok: false,
+          error: error.message,
+          needsMapping: true,
+          mappingColumns: error.columns,
+          projectFileId: projectFile.id,
+        } satisfies ProjectDocumentActionResult;
+      }
+
       return actionError(error, "Excel parsing failed.");
     }
 
     if (rows.length > 0) {
-      const { error: boqError } = await supabase.from("boq_items").insert(
-        rows.map((row) => {
-          const prediction = predictClassification(row.description);
+      const saveError = await saveParsedBoqRows({
+        projectFileId: projectFile.id,
+        projectId,
+        rows,
+        supabase,
+        userId: user.id,
+      });
 
-          return {
-            project_id: projectId,
-            project_file_id: projectFile.id,
-            source_file_id: projectFile.id,
-            user_id: user.id,
-            description: row.description,
-            quantity: row.quantity,
-            unit: row.unit,
-            rate: row.rate,
-            amount: row.amount,
-            category: prediction.predicted_category,
-            subcategory: prediction.predicted_subcategory,
-            confidence_score: prediction.confidence_score,
-            sheet_name: row.sheet_name,
-            row_number: row.row_number,
-          };
-        }),
-      );
-
-      if (boqError) {
-        return { ok: false, error: boqError.message } satisfies ProjectDocumentActionResult;
-      }
-
-      const { error: learningError } = await supabase.from("ai_training_data").insert(
-        rows.map((row) => {
-          const prediction = predictClassification(row.description);
-
-          return {
-            project_id: projectId,
-            source_file_id: projectFile.id,
-            user_id: user.id,
-            source_type: "boq_item",
-            source_id: projectFile.id,
-            item_description: row.description,
-            predicted_category: prediction.predicted_category,
-            predicted_subcategory: prediction.predicted_subcategory,
-            predicted_supplier_type: prediction.predicted_supplier_type,
-            confidence_score: prediction.confidence_score,
-            final_category: prediction.predicted_category,
-            final_subcategory: prediction.predicted_subcategory,
-            input: {
-              description: row.description,
-              quantity: row.quantity,
-              unit: row.unit,
-              rate: row.rate,
-              amount: row.amount,
-              sheet_name: row.sheet_name,
-              row_number: row.row_number,
-            },
-            output: prediction,
-          };
-        }),
-      );
-
-      if (learningError) {
-        await supabase.from("boq_items").delete().eq("source_file_id", projectFile.id).eq("user_id", user.id);
-        return { ok: false, error: learningError.message } satisfies ProjectDocumentActionResult;
+      if (saveError) {
+        return { ok: false, error: saveError } satisfies ProjectDocumentActionResult;
       }
     }
   }
 
   revalidatePath(`/projects/${projectId}`);
   return { ok: true, message: "File uploaded successfully." } satisfies ProjectDocumentActionResult;
+}
+
+export async function saveBoqColumnMappingAndParse(formData: FormData) {
+  const projectId = readString(formData, "project_id");
+  const projectFileId = readString(formData, "project_file_id");
+  const mapping = {
+    description: readString(formData, "description_column"),
+    quantity: readString(formData, "quantity_column") || null,
+    unit: readString(formData, "unit_column") || null,
+    rate: readString(formData, "rate_column") || null,
+    amount: readString(formData, "amount_column") || null,
+  } satisfies ColumnMapping;
+
+  if (!projectId || !projectFileId || !mapping.description) {
+    return { ok: false, error: "Choose at least a Description column." } satisfies ProjectDocumentActionResult;
+  }
+
+  const { supabase, user, error: userError } = await getAuthenticatedUser();
+
+  if (userError || !user) {
+    return { ok: false, error: "Sign in to save BOQ column mapping." } satisfies ProjectDocumentActionResult;
+  }
+
+  const { data: projectFile, error: fileError } = await supabase
+    .from("project_files")
+    .select("id, storage_path")
+    .eq("id", projectFileId)
+    .eq("project_id", projectId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (fileError || !projectFile) {
+    return { ok: false, error: fileError?.message || "Uploaded file not found." } satisfies ProjectDocumentActionResult;
+  }
+
+  const { error: mappingError } = await supabase.from("project_boq_column_mappings").upsert(
+    {
+      project_id: projectId,
+      user_id: user.id,
+      description_column: mapping.description,
+      quantity_column: mapping.quantity,
+      unit_column: mapping.unit,
+      rate_column: mapping.rate,
+      amount_column: mapping.amount,
+    },
+    { onConflict: "project_id" },
+  );
+
+  if (mappingError) {
+    return { ok: false, error: mappingError.message } satisfies ProjectDocumentActionResult;
+  }
+
+  const { data: blob, error: downloadError } = await supabase.storage
+    .from("project-documents")
+    .download(projectFile.storage_path);
+
+  if (downloadError || !blob) {
+    return { ok: false, error: downloadError?.message || "Could not download uploaded workbook." } satisfies ProjectDocumentActionResult;
+  }
+
+  let rows: ParsedBoqRow[];
+
+  try {
+    rows = await parseBoqWorkbook(blob, mapping);
+  } catch (error) {
+    return actionError(error, "Excel parsing failed with the selected mapping.");
+  }
+
+  await supabase.from("boq_items").delete().eq("source_file_id", projectFileId).eq("user_id", user.id);
+
+  const saveError = await saveParsedBoqRows({
+    projectFileId,
+    projectId,
+    rows,
+    supabase,
+    userId: user.id,
+  });
+
+  if (saveError) {
+    return { ok: false, error: saveError } satisfies ProjectDocumentActionResult;
+  }
+
+  revalidatePath(`/projects/${projectId}`);
+  return { ok: true, message: "Column mapping saved and BOQ parsed." } satisfies ProjectDocumentActionResult;
 }
 
 export async function correctBoqClassification(formData: FormData) {
