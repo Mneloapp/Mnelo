@@ -8,8 +8,13 @@ export type BoqItem = {
   projectId: string;
   sourceFileId: string | null;
   description: string;
-  quantity: number;
-  unit: string;
+  quantity: number | null;
+  unit: string | null;
+  rate: number | null;
+  amount: number | null;
+  category: string;
+  subcategory: string;
+  confidenceScore: number;
   sheetName: string;
   rowNumber: number;
 };
@@ -77,10 +82,16 @@ export type BoqItemRow = {
   id: string;
   project_id: string;
   project_file_id: string | null;
+  source_file_id?: string | null;
   user_id: string;
   description: string;
-  quantity: number;
-  unit: string;
+  quantity: number | null;
+  unit: string | null;
+  rate?: number | null;
+  amount?: number | null;
+  category?: string | null;
+  subcategory?: string | null;
+  confidence_score?: number | null;
   sheet_name: string;
   row_number: number;
   created_at: string;
@@ -237,10 +248,15 @@ export function mapBoqItem(row: BoqItemRow): BoqItem {
   return {
     id: row.id,
     projectId: row.project_id,
-    sourceFileId: row.project_file_id,
+    sourceFileId: row.source_file_id || row.project_file_id,
     description: row.description,
-    quantity: Number(row.quantity || 0),
+    quantity: row.quantity === null ? null : Number(row.quantity || 0),
     unit: row.unit,
+    rate: row.rate === null || row.rate === undefined ? null : Number(row.rate || 0),
+    amount: row.amount === null || row.amount === undefined ? null : Number(row.amount || 0),
+    category: row.category || "General",
+    subcategory: row.subcategory || "Unclassified",
+    confidenceScore: Number(row.confidence_score || 0),
     sheetName: row.sheet_name,
     rowNumber: row.row_number,
   };

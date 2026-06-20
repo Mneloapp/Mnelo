@@ -8,9 +8,11 @@ import type { DocumentType } from "@/lib/data";
 
 const documentTypes = ["BOQ Excel", "Specification PDF", "Drawing PDF", "Other"] satisfies DocumentType[];
 const allowedExtensions = [".xlsx", ".xls", ".pdf"];
-const descriptionHeaders = ["description", "desc", "item description", "item", "scope", "work item"];
-const quantityHeaders = ["quantity", "qty", "q'ty", "qnty", "amount"];
+const descriptionHeaders = ["description", "desc", "item description", "item", "item name", "name", "scope", "work item"];
+const quantityHeaders = ["quantity", "qty", "q'ty", "qnty"];
 const unitHeaders = ["unit", "uom", "unit of measure", "units"];
+const rateHeaders = ["rate", "unit rate", "unit price", "price", "cost"];
+const amountHeaders = ["amount", "total", "total amount", "line total", "extended amount"];
 const learningCategories = [
   {
     category: "HVAC",
@@ -76,8 +78,10 @@ const learningCategories = [
 
 type ParsedBoqRow = {
   description: string;
-  quantity: number;
-  unit: string;
+  quantity: number | null;
+  unit: string | null;
+  rate: number | null;
+  amount: number | null;
   sheet_name: string;
   row_number: number;
 };
@@ -107,14 +111,22 @@ function normalizeHeader(value: unknown) {
   return String(value || "")
     .trim()
     .toLowerCase()
+    .replace(/[_/.-]+/g, " ")
     .replace(/\s+/g, " ");
 }
 
 function findColumn(headers: unknown[], names: string[]) {
-  return headers.findIndex((header) => names.includes(normalizeHeader(header)));
+  return headers.findIndex((header) => {
+    const normalizedHeader = normalizeHeader(header);
+
+    return names.some((name) => {
+      const normalizedName = normalizeHeader(name);
+      return normalizedHeader === normalizedName || normalizedHeader.includes(normalizedName);
+    });
+  });
 }
 
-function parseQuantity(value: unknown) {
+function parseNumber(value: unknown) {
   if (typeof value === "number") {
     return Number.isFinite(value) ? value : null;
   }
@@ -122,10 +134,15 @@ function parseQuantity(value: unknown) {
   const parsed = Number(
     String(value || "")
       .replace(/,/g, "")
+      .replace(/[$€£]/g, "")
       .trim(),
   );
 
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function cellText(value: unknown) {
+  return String(value || "").trim();
 }
 
 function predictClassification(description: string): ClassificationPrediction {
@@ -155,9 +172,20 @@ function predictClassification(description: string): ClassificationPrediction {
 }
 
 async function parseBoqWorkbook(file: File) {
-  const buffer = await file.arrayBuffer();
-  const workbook = XLSX.read(buffer, { type: "array" });
+  let workbook: XLSX.WorkBook;
   const parsedRows: ParsedBoqRow[] = [];
+
+  try {
+    const buffer = await file.arrayBuffer();
+    workbook = XLSX.read(buffer, { cellDates: true, dense: false, type: "array" });
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : "Unable to read Excel workbook.");
+  }
+
+  if (workbook.SheetNames.length === 0) {
+    throw new Error("Workbook has no sheets.");
+  }
+
 
   for (const sheetName of workbook.SheetNames) {
     const sheet = workbook.Sheets[sheetName];
@@ -167,12 +195,34 @@ async function parseBoqWorkbook(file: File) {
       header: 1,
       raw: true,
     });
-    const headerRowIndex = rows.findIndex((row) => {
+
+    const headerCandidates = rows.slice(0, 30).map((row, index) => {
       const descriptionColumn = findColumn(row, descriptionHeaders);
       const quantityColumn = findColumn(row, quantityHeaders);
       const unitColumn = findColumn(row, unitHeaders);
-      return descriptionColumn >= 0 && quantityColumn >= 0 && unitColumn >= 0;
+      const rateColumn = findColumn(row, rateHeaders);
+      const amountColumn = findColumn(row, amountHeaders);
+      const score =
+        (descriptionColumn >= 0 ? 4 : 0) +
+        (quantityColumn >= 0 ? 2 : 0) +
+        (unitColumn >= 0 ? 1 : 0) +
+        (rateColumn >= 0 ? 1 : 0) +
+        (amountColumn >= 0 ? 1 : 0);
+
+      return {
+        index,
+        descriptionColumn,
+        quantityColumn,
+        unitColumn,
+        rateColumn,
+        amountColumn,
+        score,
+      };
     });
+    const headerMatch = headerCandidates
+      .filter((candidate) => candidate.descriptionColumn >= 0)
+      .sort((a, b) => b.score - a.score)[0];
+    const headerRowIndex = headerMatch?.index ?? -1;
 
     if (headerRowIndex < 0) {
       continue;
@@ -182,13 +232,17 @@ async function parseBoqWorkbook(file: File) {
     const descriptionColumn = findColumn(headers, descriptionHeaders);
     const quantityColumn = findColumn(headers, quantityHeaders);
     const unitColumn = findColumn(headers, unitHeaders);
+    const rateColumn = findColumn(headers, rateHeaders);
+    const amountColumn = findColumn(headers, amountHeaders);
 
     for (const [index, row] of rows.slice(headerRowIndex + 1).entries()) {
-      const description = String(row[descriptionColumn] || "").trim();
-      const quantity = parseQuantity(row[quantityColumn]);
-      const unit = String(row[unitColumn] || "").trim();
+      const description = cellText(row[descriptionColumn]);
+      const quantity = quantityColumn >= 0 ? parseNumber(row[quantityColumn]) : null;
+      const unit = unitColumn >= 0 ? cellText(row[unitColumn]) || null : null;
+      const rate = rateColumn >= 0 ? parseNumber(row[rateColumn]) : null;
+      const amount = amountColumn >= 0 ? parseNumber(row[amountColumn]) : null;
 
-      if (!description || quantity === null || !unit) {
+      if (!description) {
         continue;
       }
 
@@ -196,10 +250,18 @@ async function parseBoqWorkbook(file: File) {
         description,
         quantity,
         unit,
+        rate,
+        amount,
         sheet_name: sheetName,
         row_number: headerRowIndex + index + 2,
       });
     }
+  }
+
+  if (parsedRows.length === 0) {
+    throw new Error(
+      "No BOQ rows were parsed. Expected a header row with a description, item, or name column, plus optional quantity, unit, rate, or amount columns.",
+    );
   }
 
   return parsedRows;
@@ -325,20 +387,37 @@ export async function uploadProjectDocument(formData: FormData) {
   }
 
   if (extension === ".xlsx" || extension === ".xls") {
-    const rows = await parseBoqWorkbook(file);
+    let rows: ParsedBoqRow[];
+
+    try {
+      rows = await parseBoqWorkbook(file);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Excel parsing failed.";
+      redirect(`/projects/${projectId}?error=${encodeURIComponent(message)}`);
+    }
 
     if (rows.length > 0) {
       const { error: boqError } = await supabase.from("boq_items").insert(
-        rows.map((row) => ({
-          project_id: projectId,
-          project_file_id: projectFile.id,
-          user_id: user.id,
-          description: row.description,
-          quantity: row.quantity,
-          unit: row.unit,
-          sheet_name: row.sheet_name,
-          row_number: row.row_number,
-        })),
+        rows.map((row) => {
+          const prediction = predictClassification(row.description);
+
+          return {
+            project_id: projectId,
+            project_file_id: projectFile.id,
+            source_file_id: projectFile.id,
+            user_id: user.id,
+            description: row.description,
+            quantity: row.quantity,
+            unit: row.unit,
+            rate: row.rate,
+            amount: row.amount,
+            category: prediction.predicted_category,
+            subcategory: prediction.predicted_subcategory,
+            confidence_score: prediction.confidence_score,
+            sheet_name: row.sheet_name,
+            row_number: row.row_number,
+          };
+        }),
       );
 
       if (boqError) {
@@ -366,6 +445,8 @@ export async function uploadProjectDocument(formData: FormData) {
               description: row.description,
               quantity: row.quantity,
               unit: row.unit,
+              rate: row.rate,
+              amount: row.amount,
               sheet_name: row.sheet_name,
               row_number: row.row_number,
             },
@@ -375,7 +456,7 @@ export async function uploadProjectDocument(formData: FormData) {
       );
 
       if (learningError) {
-        await supabase.from("boq_items").delete().eq("project_file_id", projectFile.id).eq("user_id", user.id);
+        await supabase.from("boq_items").delete().eq("source_file_id", projectFile.id).eq("user_id", user.id);
         redirect(`/projects/${projectId}?error=${encodeURIComponent(learningError.message)}`);
       }
     }

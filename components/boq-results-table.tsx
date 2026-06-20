@@ -52,6 +52,8 @@ export function BoqResultsTable({
                 <th className="px-5 py-3 font-semibold">Description</th>
                 <th className="px-5 py-3 text-right font-semibold">Quantity</th>
                 <th className="px-5 py-3 font-semibold">Unit</th>
+                <th className="px-5 py-3 text-right font-semibold">Rate</th>
+                <th className="px-5 py-3 text-right font-semibold">Amount</th>
                 <th className="px-5 py-3 font-semibold">Sheet</th>
                 <th className="px-5 py-3 text-right font-semibold">Row</th>
                 <th className="px-5 py-3 font-semibold">Classification</th>
@@ -61,10 +63,10 @@ export function BoqResultsTable({
             <tbody className="divide-y divide-line bg-white">
               {items.map((item) => {
                 const learningRecord = latestLearningByItem.get(learningKey(item.sourceFileId, item.description));
-                const predictedCategory = learningRecord?.predictedCategory || "General";
-                const predictedSubcategory = learningRecord?.predictedSubcategory || "Unclassified";
+                const predictedCategory = learningRecord?.predictedCategory || item.category;
+                const predictedSubcategory = learningRecord?.predictedSubcategory || item.subcategory;
                 const predictedSupplierType = learningRecord?.predictedSupplierType || "General supplier";
-                const confidenceScore = learningRecord?.confidenceScore || 0;
+                const confidenceScore = learningRecord?.confidenceScore || item.confidenceScore;
                 const finalCategory = learningRecord?.finalCategory || predictedCategory;
                 const finalSubcategory = learningRecord?.finalSubcategory || predictedSubcategory;
                 const wasCorrected = Boolean(
@@ -75,9 +77,15 @@ export function BoqResultsTable({
                   <tr key={item.id} className="align-top transition hover:bg-leaf-50/40">
                     <td className="min-w-72 px-5 py-4 font-medium text-ink">{item.description}</td>
                     <td className="whitespace-nowrap px-5 py-4 text-right text-ink/70">
-                      {item.quantity.toLocaleString()}
+                      {item.quantity === null ? "—" : item.quantity.toLocaleString()}
                     </td>
-                    <td className="whitespace-nowrap px-5 py-4 text-ink/60">{item.unit}</td>
+                    <td className="whitespace-nowrap px-5 py-4 text-ink/60">{item.unit || "—"}</td>
+                    <td className="whitespace-nowrap px-5 py-4 text-right text-ink/60">
+                      {item.rate === null ? "—" : item.rate.toLocaleString()}
+                    </td>
+                    <td className="whitespace-nowrap px-5 py-4 text-right text-ink/60">
+                      {item.amount === null ? "—" : item.amount.toLocaleString()}
+                    </td>
                     <td className="whitespace-nowrap px-5 py-4 text-ink/60">{item.sheetName}</td>
                     <td className="whitespace-nowrap px-5 py-4 text-right font-mono text-xs text-ink/45">
                       {item.rowNumber}
@@ -138,7 +146,7 @@ export function BoqResultsTable({
         <div className="p-8 text-center">
           <p className="font-medium text-ink">No BOQ rows parsed yet</p>
           <p className="mt-2 text-sm text-ink/55">
-            Upload an Excel BOQ file with description, quantity, and unit columns to populate this table.
+            Upload an Excel BOQ file with description, item, or name columns to populate this table.
           </p>
         </div>
       )}
