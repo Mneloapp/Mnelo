@@ -3,7 +3,12 @@ import { AppNav } from "@/components/app-nav";
 import { Badge, Button, Shell, StatCard } from "@/components/ui";
 import { BoqResultsTable } from "@/components/boq-results-table";
 import { uploadProjectDocument } from "@/app/projects/actions";
-import { getBoqItemsForCurrentUser, getProjectFilesForCurrentUser, getProjectForCurrentUser } from "@/lib/data";
+import {
+  getBoqItemsForCurrentUser,
+  getLearningRecordsForCurrentUser,
+  getProjectFilesForCurrentUser,
+  getProjectForCurrentUser,
+} from "@/lib/data";
 
 export const dynamic = "force-dynamic";
 
@@ -15,17 +20,19 @@ export default async function ProjectDetailsPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const { id } = await params;
-  const [{ error }, projectResult, fileResult, boqResult] = await Promise.all([
+  const [{ error }, projectResult, fileResult, boqResult, learningResult] = await Promise.all([
     searchParams,
     getProjectForCurrentUser(id),
     getProjectFilesForCurrentUser(id),
     getBoqItemsForCurrentUser(id),
+    getLearningRecordsForCurrentUser(id),
   ]);
   const { project, errorMessage } = projectResult;
   const { files, errorMessage: filesErrorMessage } = fileResult;
   const { items: boqItems, errorMessage: boqErrorMessage } = boqResult;
+  const { records: learningRecords, errorMessage: learningErrorMessage } = learningResult;
   const showFilesError = process.env.NODE_ENV === "development" && filesErrorMessage;
-  const showBoqError = process.env.NODE_ENV === "development" && boqErrorMessage;
+  const showBoqError = process.env.NODE_ENV === "development" && (boqErrorMessage || learningErrorMessage);
 
   if (!project) {
     if (errorMessage) {
@@ -213,10 +220,10 @@ export default async function ProjectDetailsPage({
       </section>
 
       <div id="boq">
-        <BoqResultsTable items={boqItems} />
+        <BoqResultsTable items={boqItems} learningRecords={learningRecords} />
         {showBoqError ? (
           <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 font-mono text-xs text-red-800">
-            {boqErrorMessage}
+            {boqErrorMessage || learningErrorMessage}
           </p>
         ) : null}
       </div>

@@ -11,6 +11,68 @@ const allowedExtensions = [".xlsx", ".xls", ".pdf"];
 const descriptionHeaders = ["description", "desc", "item description", "item", "scope", "work item"];
 const quantityHeaders = ["quantity", "qty", "q'ty", "qnty", "amount"];
 const unitHeaders = ["unit", "uom", "unit of measure", "units"];
+const learningCategories = [
+  {
+    category: "HVAC",
+    subcategory: "Mechanical systems",
+    supplierType: "Specialist contractor",
+    keywords: ["ahu", "air handling", "duct", "diffuser", "fan coil", "hvac", "chiller", "ventilation"],
+  },
+  {
+    category: "Electrical",
+    subcategory: "Power and controls",
+    supplierType: "Electrical supplier",
+    keywords: ["cable", "switchgear", "panel", "lighting", "conduit", "generator", "transformer", "electrical"],
+  },
+  {
+    category: "Furniture",
+    subcategory: "Fixtures and furnishings",
+    supplierType: "Furniture supplier",
+    keywords: ["desk", "chair", "table", "cabinet", "furniture", "workstation", "sofa"],
+  },
+  {
+    category: "Medical Equipment",
+    subcategory: "Clinical equipment",
+    supplierType: "Medical equipment supplier",
+    keywords: ["medical", "clinical", "patient", "scanner", "bedhead", "laboratory", "hospital"],
+  },
+  {
+    category: "Industrial Equipment",
+    subcategory: "Plant and machinery",
+    supplierType: "Industrial equipment supplier",
+    keywords: ["machine", "compressor", "pump", "conveyor", "industrial", "motor", "tank", "valve"],
+  },
+  {
+    category: "Software",
+    subcategory: "Digital systems",
+    supplierType: "Software vendor",
+    keywords: ["software", "license", "platform", "subscription", "integration", "api", "dashboard"],
+  },
+  {
+    category: "Construction Materials",
+    subcategory: "Materials and finishes",
+    supplierType: "Materials supplier",
+    keywords: ["concrete", "steel", "cement", "timber", "block", "tile", "paint", "gypsum", "aggregate"],
+  },
+  {
+    category: "Renewable Energy",
+    subcategory: "Energy systems",
+    supplierType: "Energy systems supplier",
+    keywords: ["solar", "pv", "battery", "inverter", "renewable", "wind", "energy storage"],
+  },
+  {
+    category: "Logistics",
+    subcategory: "Freight and handling",
+    supplierType: "Logistics provider",
+    keywords: ["freight", "shipping", "delivery", "transport", "logistics", "warehouse", "customs"],
+  },
+  {
+    category: "Office Supplies",
+    subcategory: "Consumables",
+    supplierType: "Office supplier",
+    keywords: ["paper", "stationery", "printer", "toner", "office supplies", "folder"],
+  },
+] as const;
 
 type ParsedBoqRow = {
   description: string;
@@ -18,6 +80,13 @@ type ParsedBoqRow = {
   unit: string;
   sheet_name: string;
   row_number: number;
+};
+
+type ClassificationPrediction = {
+  predicted_category: string;
+  predicted_subcategory: string;
+  predicted_supplier_type: string;
+  confidence_score: number;
 };
 
 function readString(formData: FormData, key: string) {
@@ -57,6 +126,32 @@ function parseQuantity(value: unknown) {
   );
 
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function predictClassification(description: string): ClassificationPrediction {
+  const normalizedDescription = description.toLowerCase();
+  const match = learningCategories
+    .map((category) => ({
+      ...category,
+      matches: category.keywords.filter((keyword) => normalizedDescription.includes(keyword)).length,
+    }))
+    .sort((a, b) => b.matches - a.matches)[0];
+
+  if (!match?.matches) {
+    return {
+      predicted_category: "General",
+      predicted_subcategory: "Unclassified",
+      predicted_supplier_type: "General supplier",
+      confidence_score: 0.35,
+    };
+  }
+
+  return {
+    predicted_category: match.category,
+    predicted_subcategory: match.subcategory,
+    predicted_supplier_type: match.supplierType,
+    confidence_score: Math.min(0.95, 0.58 + match.matches * 0.12),
+  };
 }
 
 async function parseBoqWorkbook(file: File) {
@@ -249,9 +344,112 @@ export async function uploadProjectDocument(formData: FormData) {
       if (boqError) {
         redirect(`/projects/${projectId}?error=${encodeURIComponent(boqError.message)}`);
       }
+
+      const { error: learningError } = await supabase.from("ai_training_data").insert(
+        rows.map((row) => {
+          const prediction = predictClassification(row.description);
+
+          return {
+            project_id: projectId,
+            source_file_id: projectFile.id,
+            user_id: user.id,
+            source_type: "boq_item",
+            source_id: projectFile.id,
+            item_description: row.description,
+            predicted_category: prediction.predicted_category,
+            predicted_subcategory: prediction.predicted_subcategory,
+            predicted_supplier_type: prediction.predicted_supplier_type,
+            confidence_score: prediction.confidence_score,
+            final_category: prediction.predicted_category,
+            final_subcategory: prediction.predicted_subcategory,
+            input: {
+              description: row.description,
+              quantity: row.quantity,
+              unit: row.unit,
+              sheet_name: row.sheet_name,
+              row_number: row.row_number,
+            },
+            output: prediction,
+          };
+        }),
+      );
+
+      if (learningError) {
+        await supabase.from("boq_items").delete().eq("project_file_id", projectFile.id).eq("user_id", user.id);
+        redirect(`/projects/${projectId}?error=${encodeURIComponent(learningError.message)}`);
+      }
     }
   }
 
   revalidatePath(`/projects/${projectId}`);
   redirect(`/projects/${projectId}`);
+}
+
+export async function correctBoqClassification(formData: FormData) {
+  const projectId = readString(formData, "project_id");
+  const sourceFileId = readString(formData, "source_file_id");
+  const itemDescription = readString(formData, "item_description");
+  const predictedCategory = readString(formData, "predicted_category");
+  const predictedSubcategory = readString(formData, "predicted_subcategory");
+  const predictedSupplierType = readString(formData, "predicted_supplier_type");
+  const confidenceScore = Number(readString(formData, "confidence_score") || 0);
+  const correctedCategory = readString(formData, "user_corrected_category");
+  const correctedSubcategory = readString(formData, "user_corrected_subcategory");
+
+  if (!projectId || !sourceFileId || !itemDescription || !correctedCategory) {
+    redirect(`/projects/${projectId || ""}?error=${encodeURIComponent("Choose a category before saving a correction.")}`);
+  }
+
+  const { supabase, user, error: userError } = await getAuthenticatedUser();
+
+  if (userError || !user) {
+    redirect("/login");
+  }
+
+  const { data: project, error: projectError } = await supabase
+    .from("projects")
+    .select("id")
+    .eq("id", projectId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (projectError || !project) {
+    redirect(`/projects/${projectId}?error=${encodeURIComponent(projectError?.message || "Project not found.")}`);
+  }
+
+  const finalSubcategory = correctedSubcategory || predictedSubcategory || "Unclassified";
+  const { error } = await supabase.from("ai_training_data").insert({
+    project_id: projectId,
+    source_file_id: sourceFileId,
+    user_id: user.id,
+    source_type: "boq_item_correction",
+    source_id: sourceFileId,
+    item_description: itemDescription,
+    predicted_category: predictedCategory || "General",
+    predicted_subcategory: predictedSubcategory || "Unclassified",
+    predicted_supplier_type: predictedSupplierType || "General supplier",
+    confidence_score: Number.isFinite(confidenceScore) ? confidenceScore : null,
+    user_corrected_category: correctedCategory,
+    user_corrected_subcategory: correctedSubcategory || null,
+    final_category: correctedCategory,
+    final_subcategory: finalSubcategory,
+    input: {
+      description: itemDescription,
+      previous_category: predictedCategory,
+      previous_subcategory: predictedSubcategory,
+    },
+    output: {
+      final_category: correctedCategory,
+      final_subcategory: finalSubcategory,
+    },
+    feedback: "User classification correction",
+  });
+
+  if (error) {
+    redirect(`/projects/${projectId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath(`/projects/${projectId}`);
+  revalidatePath("/learning");
+  redirect(`/projects/${projectId}#boq`);
 }

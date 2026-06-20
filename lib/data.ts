@@ -5,6 +5,8 @@ export type ProjectRisk = "Low" | "Medium" | "High";
 
 export type BoqItem = {
   id: string;
+  projectId: string;
+  sourceFileId: string | null;
   description: string;
   quantity: number;
   unit: string;
@@ -104,6 +106,48 @@ export type BoqItemsQueryResult = {
   errorMessage: string | null;
 };
 
+export type LearningRecordRow = {
+  id: string;
+  project_id: string | null;
+  source_file_id: string | null;
+  user_id: string;
+  item_description: string | null;
+  predicted_category: string | null;
+  predicted_subcategory: string | null;
+  predicted_supplier_type: string | null;
+  confidence_score: number | null;
+  user_corrected_category: string | null;
+  user_corrected_subcategory: string | null;
+  final_category: string | null;
+  final_subcategory: string | null;
+  created_at: string;
+};
+
+export type LearningRecord = {
+  id: string;
+  projectId: string | null;
+  sourceFileId: string | null;
+  itemDescription: string;
+  predictedCategory: string;
+  predictedSubcategory: string;
+  predictedSupplierType: string;
+  confidenceScore: number;
+  userCorrectedCategory: string | null;
+  userCorrectedSubcategory: string | null;
+  finalCategory: string;
+  finalSubcategory: string;
+  createdAt: string;
+};
+
+export type LearningSummary = {
+  totalRecords: number;
+  correctionRate: number;
+  mostCommonCategories: Array<{ category: string; count: number }>;
+  mostCorrectedClassifications: Array<{ from: string; to: string; count: number }>;
+  recentRecords: LearningRecord[];
+  errorMessage: string | null;
+};
+
 export const formatCurrency = (value: number) =>
   new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -192,11 +236,34 @@ export function mapProjectFile(row: ProjectFileRow): ProjectFile {
 export function mapBoqItem(row: BoqItemRow): BoqItem {
   return {
     id: row.id,
+    projectId: row.project_id,
+    sourceFileId: row.project_file_id,
     description: row.description,
     quantity: Number(row.quantity || 0),
     unit: row.unit,
     sheetName: row.sheet_name,
     rowNumber: row.row_number,
+  };
+}
+
+export function mapLearningRecord(row: LearningRecordRow): LearningRecord {
+  const predictedCategory = row.predicted_category || "General";
+  const predictedSubcategory = row.predicted_subcategory || "Unclassified";
+
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    sourceFileId: row.source_file_id,
+    itemDescription: row.item_description || "No description",
+    predictedCategory,
+    predictedSubcategory,
+    predictedSupplierType: row.predicted_supplier_type || "General supplier",
+    confidenceScore: Number(row.confidence_score || 0),
+    userCorrectedCategory: row.user_corrected_category,
+    userCorrectedSubcategory: row.user_corrected_subcategory,
+    finalCategory: row.final_category || row.user_corrected_category || predictedCategory,
+    finalSubcategory: row.final_subcategory || row.user_corrected_subcategory || predictedSubcategory,
+    createdAt: formatDate(row.created_at),
   };
 }
 
@@ -337,4 +404,102 @@ export async function getBoqItemsForCurrentUser(projectId: string) {
     items: (data as BoqItemRow[]).map(mapBoqItem),
     errorMessage: null,
   } satisfies BoqItemsQueryResult;
+}
+
+export async function getLearningRecordsForCurrentUser(projectId: string) {
+  const userId = await getAuthenticatedUserId();
+
+  if (!userId) {
+    return {
+      records: [],
+      errorMessage: null,
+    };
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("ai_training_data")
+    .select("*")
+    .eq("project_id", projectId)
+    .eq("user_id", userId)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    return {
+      records: [],
+      errorMessage: error.message,
+    };
+  }
+
+  return {
+    records: (data as LearningRecordRow[]).map(mapLearningRecord),
+    errorMessage: null,
+  };
+}
+
+export async function getLearningSummaryForCurrentUser() {
+  const userId = await getAuthenticatedUserId();
+
+  if (!userId) {
+    return {
+      totalRecords: 0,
+      correctionRate: 0,
+      mostCommonCategories: [],
+      mostCorrectedClassifications: [],
+      recentRecords: [],
+      errorMessage: null,
+    } satisfies LearningSummary;
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("ai_training_data")
+    .select("*")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    return {
+      totalRecords: 0,
+      correctionRate: 0,
+      mostCommonCategories: [],
+      mostCorrectedClassifications: [],
+      recentRecords: [],
+      errorMessage: error.message,
+    } satisfies LearningSummary;
+  }
+
+  const records = (data as LearningRecordRow[]).map(mapLearningRecord);
+  const correctedRecords = records.filter((record) => record.userCorrectedCategory || record.userCorrectedSubcategory);
+  const categoryCounts = new Map<string, number>();
+  const correctionCounts = new Map<string, { from: string; to: string; count: number }>();
+
+  for (const record of records) {
+    const category = record.finalCategory || record.predictedCategory || "General";
+    categoryCounts.set(category, (categoryCounts.get(category) || 0) + 1);
+
+    if (record.userCorrectedCategory && record.userCorrectedCategory !== record.predictedCategory) {
+      const key = `${record.predictedCategory}->${record.userCorrectedCategory}`;
+      const existing = correctionCounts.get(key);
+      correctionCounts.set(key, {
+        from: record.predictedCategory,
+        to: record.userCorrectedCategory,
+        count: (existing?.count || 0) + 1,
+      });
+    }
+  }
+
+  return {
+    totalRecords: records.length,
+    correctionRate: records.length > 0 ? Math.round((correctedRecords.length / records.length) * 100) : 0,
+    mostCommonCategories: Array.from(categoryCounts.entries())
+      .map(([category, count]) => ({ category, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 6),
+    mostCorrectedClassifications: Array.from(correctionCounts.values())
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 6),
+    recentRecords: records.slice(0, 8),
+    errorMessage: null,
+  } satisfies LearningSummary;
 }

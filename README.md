@@ -15,6 +15,7 @@ Mnelo is a premium SaaS interface for an AI workspace focused on estimation and 
 - `/` landing page
 - `/login` login page
 - `/dashboard` dashboard
+- `/learning` learning engine admin page
 - `/projects` projects page
 - `/projects/[id]` project details and BOQ results
 
