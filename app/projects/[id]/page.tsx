@@ -2,8 +2,7 @@ import { notFound } from "next/navigation";
 import { AppNav } from "@/components/app-nav";
 import { Badge, Button, Shell, StatCard } from "@/components/ui";
 import { BoqResultsTable } from "@/components/boq-results-table";
-import { DeleteFileButton } from "@/components/delete-file-button";
-import { uploadProjectDocument } from "@/app/projects/actions";
+import { ProjectDocumentsPanel } from "@/components/project-documents-panel";
 import {
   getBoqItemsForCurrentUser,
   getLearningRecordsForCurrentUser,
@@ -34,6 +33,9 @@ export default async function ProjectDetailsPage({
   const { records: learningRecords, errorMessage: learningErrorMessage } = learningResult;
   const showFilesError = process.env.NODE_ENV === "development" && filesErrorMessage;
   const showBoqError = process.env.NODE_ENV === "development" && (boqErrorMessage || learningErrorMessage);
+  const parsedFileIds = Array.from(
+    new Set(boqItems.map((item) => item.sourceFileId).filter((fileId): fileId is string => Boolean(fileId))),
+  );
 
   if (!project) {
     if (errorMessage) {
@@ -143,95 +145,13 @@ export default async function ProjectDetailsPage({
           <Badge tone="neutral">.xlsx · .xls · .pdf</Badge>
         </div>
 
-        {error ? (
-          <div className="mt-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-            {error}
-          </div>
-        ) : null}
-
-        {message ? (
-          <div className="mt-5 rounded-lg border border-leaf-200 bg-leaf-50 px-4 py-3 text-sm text-leaf-800">
-            {message}
-          </div>
-        ) : null}
-
-        <form action={uploadProjectDocument} className="mt-5 grid gap-4 lg:grid-cols-[1fr_14rem_auto]">
-          <input name="project_id" type="hidden" value={project.id} />
-          <label className="block">
-            <span className="text-sm font-medium text-ink/70">Document file</span>
-            <input
-              accept=".xlsx,.xls,.pdf"
-              className="mt-2 block h-11 w-full rounded-lg border border-line bg-white px-3 py-2 text-sm file:mr-4 file:rounded-md file:border-0 file:bg-ink file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-white hover:file:bg-leaf-900"
-              name="file"
-              required
-              type="file"
-            />
-          </label>
-          <label className="block">
-            <span className="text-sm font-medium text-ink/70">Document type</span>
-            <select
-              className="mt-2 h-11 w-full rounded-lg border border-line bg-white px-3 text-sm outline-none transition focus:border-leaf-400 focus:ring-4 focus:ring-leaf-100"
-              name="document_type"
-            >
-              <option>BOQ Excel</option>
-              <option>Specification PDF</option>
-              <option>Drawing PDF</option>
-              <option>Other</option>
-            </select>
-          </label>
-          <div className="flex items-end">
-            <button
-              className="inline-flex h-11 w-full items-center justify-center rounded-lg bg-ink px-4 text-sm font-semibold text-white shadow-soft transition hover:bg-leaf-900 lg:w-auto"
-              type="submit"
-            >
-              Upload
-            </button>
-          </div>
-        </form>
-
-        <div className="mt-6">
-          <h3 className="text-sm font-semibold uppercase tracking-wide text-ink/45">Uploaded files</h3>
-          {files.length > 0 ? (
-            <div className="mt-3 overflow-hidden rounded-xl border border-line">
-              <div className="divide-y divide-line">
-                {files.map((file) => (
-                  <div
-                    className="grid gap-3 bg-white px-4 py-3 text-sm md:grid-cols-[1fr_10rem_7rem_9rem_auto]"
-                    key={file.id}
-                  >
-                    <div>
-                      <p className="font-medium text-ink">{file.fileName}</p>
-                      <p className="mt-1 font-mono text-xs text-ink/40">{file.storagePath}</p>
-                    </div>
-                    <p className="text-ink/65">{file.documentType}</p>
-                    <p className="text-ink/65">{file.fileSize}</p>
-                    <p className="text-ink/55">{file.uploadedAt}</p>
-                    <div className="flex items-start justify-start md:justify-end">
-                      <DeleteFileButton
-                        fileId={file.id}
-                        fileName={file.fileName}
-                        hasParsedBoq={boqItems.some((item) => item.sourceFileId === file.id)}
-                        projectId={project.id}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div className="mt-3 rounded-xl border border-dashed border-line bg-mist/50 p-6 text-center">
-              <p className="font-medium text-ink">No documents uploaded yet</p>
-              <p className="mt-2 text-sm text-ink/55">
-                Upload BOQ Excel files, specification PDFs, or drawing PDFs to start organizing project inputs.
-              </p>
-              {showFilesError ? (
-                <p className="mx-auto mt-4 max-w-2xl rounded-lg border border-red-200 bg-red-50 px-3 py-2 font-mono text-xs text-red-800">
-                  {filesErrorMessage}
-                </p>
-              ) : null}
-            </div>
-          )}
-        </div>
+        <ProjectDocumentsPanel
+          files={files}
+          initialError={error || (showFilesError ? filesErrorMessage || undefined : undefined)}
+          initialMessage={message}
+          parsedFileIds={parsedFileIds}
+          projectId={project.id}
+        />
       </section>
 
       <div id="boq">

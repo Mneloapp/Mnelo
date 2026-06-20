@@ -93,6 +93,19 @@ type ClassificationPrediction = {
   confidence_score: number;
 };
 
+export type ProjectDocumentActionResult = {
+  ok: boolean;
+  message?: string;
+  error?: string;
+};
+
+function actionError(error: unknown, fallback: string): ProjectDocumentActionResult {
+  return {
+    ok: false,
+    error: error instanceof Error ? error.message : fallback,
+  };
+}
+
 function readString(formData: FormData, key: string) {
   const value = formData.get(key);
   return typeof value === "string" ? value.trim() : "";
@@ -325,25 +338,23 @@ export async function uploadProjectDocument(formData: FormData) {
     : "Other";
 
   if (!projectId) {
-    redirect("/projects?error=Missing%20project%20id.");
+    return { ok: false, error: "Missing project id." } satisfies ProjectDocumentActionResult;
   }
 
   if (!(file instanceof File) || file.size === 0) {
-    redirect(`/projects/${projectId}?error=${encodeURIComponent("Choose a BOQ or tender document to upload.")}`);
+    return { ok: false, error: "Choose a BOQ or tender document to upload." } satisfies ProjectDocumentActionResult;
   }
 
   const extension = getFileExtension(file.name);
 
   if (!allowedExtensions.includes(extension)) {
-    redirect(
-      `/projects/${projectId}?error=${encodeURIComponent("Only .xlsx, .xls, and .pdf files are supported.")}`,
-    );
+    return { ok: false, error: "Only .xlsx, .xls, and .pdf files are supported." } satisfies ProjectDocumentActionResult;
   }
 
   const { supabase, user, error: userError } = await getAuthenticatedUser();
 
   if (userError || !user) {
-    redirect("/login");
+    return { ok: false, error: "Sign in to upload project documents." } satisfies ProjectDocumentActionResult;
   }
 
   const { data: project, error: projectError } = await supabase
@@ -354,7 +365,7 @@ export async function uploadProjectDocument(formData: FormData) {
     .maybeSingle();
 
   if (projectError || !project) {
-    redirect(`/projects/${projectId}?error=${encodeURIComponent(projectError?.message || "Project not found.")}`);
+    return { ok: false, error: projectError?.message || "Project not found." } satisfies ProjectDocumentActionResult;
   }
 
   const storagePath = `${user.id}/${projectId}/${crypto.randomUUID()}-${sanitizeFileName(file.name)}`;
@@ -364,7 +375,7 @@ export async function uploadProjectDocument(formData: FormData) {
   });
 
   if (uploadError) {
-    redirect(`/projects/${projectId}?error=${encodeURIComponent(uploadError.message)}`);
+    return { ok: false, error: uploadError.message } satisfies ProjectDocumentActionResult;
   }
 
   const { data: projectFile, error: insertError } = await supabase
@@ -383,7 +394,7 @@ export async function uploadProjectDocument(formData: FormData) {
 
   if (insertError) {
     await supabase.storage.from("project-documents").remove([storagePath]);
-    redirect(`/projects/${projectId}?error=${encodeURIComponent(insertError.message)}`);
+    return { ok: false, error: insertError.message } satisfies ProjectDocumentActionResult;
   }
 
   if (extension === ".xlsx" || extension === ".xls") {
@@ -392,8 +403,7 @@ export async function uploadProjectDocument(formData: FormData) {
     try {
       rows = await parseBoqWorkbook(file);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Excel parsing failed.";
-      redirect(`/projects/${projectId}?error=${encodeURIComponent(message)}`);
+      return actionError(error, "Excel parsing failed.");
     }
 
     if (rows.length > 0) {
@@ -421,7 +431,7 @@ export async function uploadProjectDocument(formData: FormData) {
       );
 
       if (boqError) {
-        redirect(`/projects/${projectId}?error=${encodeURIComponent(boqError.message)}`);
+        return { ok: false, error: boqError.message } satisfies ProjectDocumentActionResult;
       }
 
       const { error: learningError } = await supabase.from("ai_training_data").insert(
@@ -457,13 +467,13 @@ export async function uploadProjectDocument(formData: FormData) {
 
       if (learningError) {
         await supabase.from("boq_items").delete().eq("source_file_id", projectFile.id).eq("user_id", user.id);
-        redirect(`/projects/${projectId}?error=${encodeURIComponent(learningError.message)}`);
+        return { ok: false, error: learningError.message } satisfies ProjectDocumentActionResult;
       }
     }
   }
 
   revalidatePath(`/projects/${projectId}`);
-  redirect(`/projects/${projectId}`);
+  return { ok: true, message: "File uploaded successfully." } satisfies ProjectDocumentActionResult;
 }
 
 export async function correctBoqClassification(formData: FormData) {
@@ -541,13 +551,13 @@ export async function deleteProjectFile(formData: FormData) {
   const confirmed = readString(formData, "confirmed") === "true";
 
   if (!projectId || !fileId) {
-    redirect(`/projects/${projectId || ""}?error=${encodeURIComponent("Missing file deletion details.")}`);
+    return { ok: false, error: "Missing file deletion details." } satisfies ProjectDocumentActionResult;
   }
 
   const { supabase, user, error: userError } = await getAuthenticatedUser();
 
   if (userError || !user) {
-    redirect("/login");
+    return { ok: false, error: "Sign in to delete project documents." } satisfies ProjectDocumentActionResult;
   }
 
   const { data: projectFile, error: fileError } = await supabase
@@ -559,7 +569,7 @@ export async function deleteProjectFile(formData: FormData) {
     .maybeSingle();
 
   if (fileError || !projectFile) {
-    redirect(`/projects/${projectId}?error=${encodeURIComponent(fileError?.message || "File not found.")}`);
+    return { ok: false, error: fileError?.message || "File not found." } satisfies ProjectDocumentActionResult;
   }
 
   const { count: parsedCount, error: countError } = await supabase
@@ -570,13 +580,11 @@ export async function deleteProjectFile(formData: FormData) {
     .or(`source_file_id.eq.${fileId},project_file_id.eq.${fileId}`);
 
   if (countError) {
-    redirect(`/projects/${projectId}?error=${encodeURIComponent(countError.message)}`);
+    return { ok: false, error: countError.message } satisfies ProjectDocumentActionResult;
   }
 
   if ((parsedCount || 0) > 0 && !confirmed) {
-    redirect(
-      `/projects/${projectId}?error=${encodeURIComponent("Delete file and all parsed BOQ data?")}`,
-    );
+    return { ok: false, error: "Delete file and all parsed BOQ data?" } satisfies ProjectDocumentActionResult;
   }
 
   const { error: boqError } = await supabase
@@ -587,7 +595,7 @@ export async function deleteProjectFile(formData: FormData) {
     .or(`source_file_id.eq.${fileId},project_file_id.eq.${fileId}`);
 
   if (boqError) {
-    redirect(`/projects/${projectId}?error=${encodeURIComponent(boqError.message)}`);
+    return { ok: false, error: boqError.message } satisfies ProjectDocumentActionResult;
   }
 
   const { error: fileDeleteError } = await supabase
@@ -598,7 +606,7 @@ export async function deleteProjectFile(formData: FormData) {
     .eq("user_id", user.id);
 
   if (fileDeleteError) {
-    redirect(`/projects/${projectId}?error=${encodeURIComponent(fileDeleteError.message)}`);
+    return { ok: false, error: fileDeleteError.message } satisfies ProjectDocumentActionResult;
   }
 
   const { error: storageError } = await supabase.storage
@@ -606,9 +614,9 @@ export async function deleteProjectFile(formData: FormData) {
     .remove([projectFile.storage_path]);
 
   if (storageError) {
-    redirect(`/projects/${projectId}?error=${encodeURIComponent(storageError.message)}`);
+    return { ok: false, error: storageError.message } satisfies ProjectDocumentActionResult;
   }
 
   revalidatePath(`/projects/${projectId}`);
-  redirect(`/projects/${projectId}?message=${encodeURIComponent("File deleted successfully.")}`);
+  return { ok: true, message: "File deleted successfully." } satisfies ProjectDocumentActionResult;
 }
