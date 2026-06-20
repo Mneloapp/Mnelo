@@ -132,7 +132,10 @@ type ClassificationPrediction = {
   confidence_score: number;
 };
 
-type BoqFileColumnMode = "both" | "project_file_id" | "source_file_id" | "none";
+type BoqInsertMode = {
+  fileColumns: "both" | "project_file_id" | "source_file_id" | "none";
+  optionalColumns: "full" | "legacy";
+};
 
 export type ProjectDocumentActionResult = {
   ok: boolean;
@@ -271,14 +274,15 @@ function predictClassification(description: string): ClassificationPrediction {
 }
 
 function selectHeaderMatch(rows: unknown[][], mapping?: ColumnMapping | null) {
-  return rows.slice(0, 20).map((row, index) => {
+  return rows.slice(0, 50).map((row, index) => {
+    const rowValues = Array.isArray(row) ? row : [];
     const descriptionColumn =
-      mapping?.description ? findMappedColumn(row, mapping.description) : findColumn(row, descriptionHeaders);
+      mapping?.description ? findMappedColumn(rowValues, mapping.description) : findColumn(rowValues, descriptionHeaders);
     const quantityColumn =
-      mapping?.quantity ? findMappedColumn(row, mapping.quantity) : findColumn(row, quantityHeaders);
-    const unitColumn = mapping?.unit ? findMappedColumn(row, mapping.unit) : findColumn(row, unitHeaders);
-    const rateColumn = mapping?.rate ? findMappedColumn(row, mapping.rate) : findColumn(row, rateHeaders);
-    const amountColumn = mapping?.amount ? findMappedColumn(row, mapping.amount) : findColumn(row, amountHeaders);
+      mapping?.quantity ? findMappedColumn(rowValues, mapping.quantity) : findColumn(rowValues, quantityHeaders);
+    const unitColumn = mapping?.unit ? findMappedColumn(rowValues, mapping.unit) : findColumn(rowValues, unitHeaders);
+    const rateColumn = mapping?.rate ? findMappedColumn(rowValues, mapping.rate) : findColumn(rowValues, rateHeaders);
+    const amountColumn = mapping?.amount ? findMappedColumn(rowValues, mapping.amount) : findColumn(rowValues, amountHeaders);
     const score =
       (descriptionColumn >= 0 ? 4 : 0) +
       (quantityColumn >= 0 ? 2 : 0) +
@@ -320,7 +324,7 @@ function getMappingColumns(workbook: XLSX.WorkBook) {
   for (const sheetName of workbook.SheetNames) {
     const sheet = workbook.Sheets[sheetName];
     const rows = getSheetRows(sheet);
-    const candidate = rows.slice(0, 20).find((row) => uniqueColumnOptions(row).length > 1);
+    const candidate = rows.slice(0, 50).find((row) => uniqueColumnOptions(row).length > 1);
 
     if (candidate) {
       return uniqueColumnOptions(candidate);
@@ -328,6 +332,66 @@ function getMappingColumns(workbook: XLSX.WorkBook) {
   }
 
   return [];
+}
+
+function inferColumnsFromDataRows(rows: unknown[][]) {
+  const maxColumns = Math.max(0, ...rows.slice(0, 100).map((row) => row.length));
+  const columnScores = Array.from({ length: maxColumns }, (_, columnIndex) => {
+    let textCount = 0;
+    let numericCount = 0;
+    let shortTextCount = 0;
+    let totalTextLength = 0;
+
+    for (const row of rows.slice(0, 100)) {
+      const value = row[columnIndex];
+      const text = cellText(value);
+
+      if (!text) {
+        continue;
+      }
+
+      if (parseNumber(value) !== null) {
+        numericCount += 1;
+        continue;
+      }
+
+      textCount += 1;
+      totalTextLength += text.length;
+
+      if (text.length <= 12) {
+        shortTextCount += 1;
+      }
+    }
+
+    return {
+      columnIndex,
+      numericCount,
+      textCount,
+      shortTextCount,
+      totalTextLength,
+    };
+  });
+
+  const descriptionColumn = [...columnScores]
+    .filter((column) => column.textCount > 0)
+    .sort((a, b) => b.totalTextLength - a.totalTextLength)[0]?.columnIndex ?? -1;
+  const numericColumns = columnScores
+    .filter((column) => column.numericCount > 0)
+    .sort((a, b) => b.numericCount - a.numericCount)
+    .map((column) => column.columnIndex)
+    .filter((columnIndex) => columnIndex !== descriptionColumn);
+  const unitColumn = [...columnScores]
+    .filter((column) => column.columnIndex !== descriptionColumn && column.shortTextCount > 0)
+    .sort((a, b) => b.shortTextCount - a.shortTextCount)[0]?.columnIndex ?? -1;
+
+  return {
+    amountColumn: numericColumns[2] ?? -1,
+    descriptionColumn,
+    quantityColumn: numericColumns[0] ?? -1,
+    rateColumn: numericColumns[1] ?? -1,
+    rowStartIndex: rows.findIndex((row) => descriptionColumn >= 0 && cellText(row[descriptionColumn])),
+    unitColumn,
+  };
 }
 
 async function parseBoqWorkbook(source: Blob, mapping?: ColumnMapping | null) {
@@ -348,6 +412,35 @@ async function parseBoqWorkbook(source: Blob, mapping?: ColumnMapping | null) {
     bestScore = Math.max(bestScore, headerMatch?.score || 0);
 
     if (headerRowIndex < 0 || headerMatch.descriptionColumn < 0) {
+      const inferred = inferColumnsFromDataRows(rows);
+
+      if (inferred.descriptionColumn < 0 || inferred.rowStartIndex < 0) {
+        continue;
+      }
+
+      for (const [index, row] of rows.slice(inferred.rowStartIndex).entries()) {
+        const description = cellText(row[inferred.descriptionColumn]);
+        const quantity = inferred.quantityColumn >= 0 ? parseNumber(row[inferred.quantityColumn]) : null;
+        const unit = inferred.unitColumn >= 0 ? cellText(row[inferred.unitColumn]) || null : null;
+        const rate = inferred.rateColumn >= 0 ? parseNumber(row[inferred.rateColumn]) : null;
+        const amount = inferred.amountColumn >= 0 ? parseNumber(row[inferred.amountColumn]) : null;
+
+        if (!description) {
+          continue;
+        }
+
+        parsedRows.push({
+          amount,
+          description,
+          quantity,
+          rate,
+          row_number: inferred.rowStartIndex + index + 1,
+          sheet_name: sheetName,
+          unit,
+        });
+      }
+
+      bestScore = Math.max(bestScore, 4);
       continue;
     }
 
@@ -374,7 +467,7 @@ async function parseBoqWorkbook(source: Blob, mapping?: ColumnMapping | null) {
     }
   }
 
-  if (!mapping && bestScore < 6) {
+  if (!mapping && bestScore < 4) {
     throw new MappingRequiredError(getMappingColumns(workbook));
   }
 
@@ -437,7 +530,7 @@ async function saveParsedBoqRows({
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
   userId: string;
 }) {
-  const buildBoqRows = (fileColumnMode: BoqFileColumnMode) =>
+  const buildBoqRows = ({ fileColumns, optionalColumns }: BoqInsertMode) =>
     rows.map((row) => {
       const prediction = predictClassification(row.description);
       const payload: Record<string, unknown> = {
@@ -446,31 +539,41 @@ async function saveParsedBoqRows({
         description: row.description,
         quantity: row.quantity ?? 0,
         unit: row.unit || "",
-        rate: row.rate,
-        amount: row.amount,
-        category: prediction.predicted_category,
-        subcategory: prediction.predicted_subcategory,
-        confidence_score: prediction.confidence_score,
         sheet_name: row.sheet_name,
         row_number: row.row_number,
       };
 
-      if (fileColumnMode === "both" || fileColumnMode === "project_file_id") {
+      if (optionalColumns === "full") {
+        payload.rate = row.rate;
+        payload.amount = row.amount;
+        payload.category = prediction.predicted_category;
+        payload.subcategory = prediction.predicted_subcategory;
+        payload.confidence_score = prediction.confidence_score;
+      }
+
+      if (fileColumns === "both" || fileColumns === "project_file_id") {
         payload.project_file_id = projectFileId;
       }
 
-      if (fileColumnMode === "both" || fileColumnMode === "source_file_id") {
+      if (fileColumns === "both" || fileColumns === "source_file_id") {
         payload.source_file_id = projectFileId;
       }
 
       return payload;
     });
 
-  const insertAttempts: BoqFileColumnMode[] = ["both", "source_file_id", "project_file_id", "none"];
+  const insertAttempts: BoqInsertMode[] = [
+    { fileColumns: "both", optionalColumns: "full" },
+    { fileColumns: "source_file_id", optionalColumns: "full" },
+    { fileColumns: "project_file_id", optionalColumns: "full" },
+    { fileColumns: "none", optionalColumns: "full" },
+    { fileColumns: "project_file_id", optionalColumns: "legacy" },
+    { fileColumns: "none", optionalColumns: "legacy" },
+  ];
   let boqInsertError: string | null = null;
 
-  for (const fileColumnMode of insertAttempts) {
-    const { error: boqError } = await supabase.from("boq_items").insert(buildBoqRows(fileColumnMode));
+  for (const insertMode of insertAttempts) {
+    const { error: boqError } = await supabase.from("boq_items").insert(buildBoqRows(insertMode));
 
     if (!boqError) {
       boqInsertError = null;
@@ -481,7 +584,12 @@ async function saveParsedBoqRows({
     const canRetrySchemaFallback =
       boqError.message.includes("schema cache") ||
       boqError.message.includes("source_file_id") ||
-      boqError.message.includes("project_file_id");
+      boqError.message.includes("project_file_id") ||
+      boqError.message.includes("rate") ||
+      boqError.message.includes("amount") ||
+      boqError.message.includes("category") ||
+      boqError.message.includes("subcategory") ||
+      boqError.message.includes("confidence_score");
 
     if (!canRetrySchemaFallback) {
       break;
@@ -769,7 +877,7 @@ export async function saveBoqColumnMappingAndParse(formData: FormData) {
   );
 
   if (mappingError) {
-    return { ok: false, error: mappingError.message } satisfies ProjectDocumentActionResult;
+    console.error(`Failed saving BOQ column mapping: ${mappingError.message}`);
   }
 
   const { data: blob, error: downloadError } = await supabase.storage
