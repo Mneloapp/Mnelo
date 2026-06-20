@@ -134,7 +134,7 @@ export function BoqResultsTable({
                                 placeholder="Subcategory"
                               />
                               <button
-                                className="inline-flex h-9 items-center justify-center rounded-lg bg-ink px-3 text-xs font-semibold text-white transition hover:bg-leaf-900"
+                                className="inline-flex h-9 items-center justify-center rounded-lg bg-[#16a34a] px-3 text-xs font-semibold text-white transition hover:bg-[#087a36]"
                                 type="submit"
                               >
                                 Save correction

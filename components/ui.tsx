@@ -5,7 +5,7 @@ import { MneloLogo } from "@/components/MneloLogo";
 
 export function Logo() {
   return (
-    <Link href="/" className="flex items-center gap-2 text-sm font-semibold tracking-tight text-ink">
+    <Link href="/" className="flex items-center gap-2 text-sm font-semibold tracking-tight text-[#0f172a]">
       <MneloLogo className="[&_svg]:h-8 [&_svg]:w-8 [&_span]:text-base" />
     </Link>
   );
@@ -48,8 +48,9 @@ export function Button({
       href={href}
       className={clsx(
         "inline-flex h-10 items-center justify-center rounded-lg px-4 text-sm font-semibold transition",
-        variant === "primary" && "bg-ink text-white shadow-soft hover:bg-leaf-900",
-        variant === "secondary" && "bg-white text-ink ring-1 ring-line hover:bg-mist",
+        variant === "primary" &&
+          "bg-[#16a34a] text-white shadow-[0_12px_28px_rgba(22,163,74,0.22)] hover:bg-[#087a36]",
+        variant === "secondary" && "bg-white text-[#0f172a] ring-1 ring-[#e5e7eb] hover:bg-[#f8faf8]",
         className,
       )}
     >

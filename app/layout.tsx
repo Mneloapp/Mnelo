@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Mnelo | AI Workspace for Estimation & Procurement",
+  title: "Mnelo | Estimation & Procurement Workspace",
   description:
-    "Mnelo turns BOQs, tenders, and project documents into estimates, procurement packages, and supplier intelligence.",
+    "Mnelo helps teams turn BOQs, tenders, and project documents into estimates, procurement packages, and supplier decisions.",
 };
 
 export default function RootLayout({
