@@ -16,8 +16,8 @@ export async function createProject(formData: FormData) {
   const workType = readString(formData, "work_type");
   const notes = readString(formData, "notes");
 
-  if (!name) {
-    redirect("/projects?error=Project%20name%20is%20required.");
+  if (!name || !client || !location || !workType || !notes) {
+    redirect("/projects/new?error=All%20project%20fields%20are%20required.");
   }
 
   const supabase = await createSupabaseServerClient();
@@ -30,20 +30,24 @@ export async function createProject(formData: FormData) {
     redirect("/login");
   }
 
-  const { error } = await supabase.from("projects").insert({
-    user_id: user.id,
-    name,
-    client: client || null,
-    location: location || null,
-    work_type: workType || null,
-    notes: notes || null,
-  });
+  const { data, error } = await supabase
+    .from("projects")
+    .insert({
+      user_id: user.id,
+      name,
+      client,
+      location,
+      work_type: workType,
+      notes,
+    })
+    .select("id")
+    .single();
 
   if (error) {
-    redirect(`/projects?error=${encodeURIComponent(error.message)}`);
+    redirect(`/projects/new?error=${encodeURIComponent(error.message)}`);
   }
 
   revalidatePath("/dashboard");
   revalidatePath("/projects");
-  redirect("/projects");
+  redirect(`/projects/${data.id}`);
 }
