@@ -44,7 +44,7 @@ export default async function DashboardPage() {
   const showError = process.env.NODE_ENV === "development" && errorMessage;
 
   return (
-    <WorkspaceShell active="Projects">
+    <WorkspaceShell active="Dashboard">
       <div className="mx-auto max-w-[1440px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
         <header className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
           <div>

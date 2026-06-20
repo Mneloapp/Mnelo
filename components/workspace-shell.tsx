@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { Files, FolderKanban, Settings, TableProperties } from "lucide-react";
+import { Files, FolderKanban, LayoutDashboard, Settings, TableProperties } from "lucide-react";
 import { logout } from "@/app/auth/actions";
 import { MneloLogo } from "@/components/MneloLogo";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 const sidebarItems = [
+  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { label: "Projects", href: "/projects", icon: FolderKanban },
   { label: "Files", href: "/files", icon: Files },
   { label: "BOQ", href: "/boq", icon: TableProperties },
@@ -25,10 +26,10 @@ async function getUserEmail() {
 }
 
 export async function WorkspaceShell({
-  active = "Projects",
+  active = "Dashboard",
   children,
 }: {
-  active?: "Projects" | "Files" | "BOQ" | "Settings";
+  active?: "Dashboard" | "Projects" | "Files" | "BOQ" | "Settings";
   children: React.ReactNode;
 }) {
   const userEmail = await getUserEmail();
