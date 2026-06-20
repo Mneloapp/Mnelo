@@ -43,7 +43,9 @@ export function ProjectDocumentsPanel({
 
   async function handleResult(result: ProjectDocumentActionResult, successFallback: string) {
     if (!result.ok) {
-      setNotice({ tone: "error", message: result.error || "Action failed." });
+      const message = result.error || "Unknown action error.";
+      console.error(message);
+      setNotice({ tone: "error", message });
       return false;
     }
 
@@ -89,9 +91,10 @@ export function ProjectDocumentsPanel({
               formRef.current?.reset();
             }
           } catch (error) {
+            console.error(error);
             setNotice({
               tone: "error",
-              message: error instanceof Error ? error.message : "Upload failed.",
+              message: error instanceof Error ? error.message : "Unknown upload error.",
             });
           } finally {
             setIsUploading(false);
@@ -184,9 +187,10 @@ export function ProjectDocumentsPanel({
                               );
                             }
                           } catch (error) {
+                            console.error(error);
                             setNotice({
                               tone: "error",
-                              message: error instanceof Error ? error.message : "Delete failed.",
+                              message: error instanceof Error ? error.message : "Unknown delete error.",
                             });
                           } finally {
                             setDeletingFileId(null);

@@ -106,6 +106,16 @@ function actionError(error: unknown, fallback: string): ProjectDocumentActionRes
   };
 }
 
+function deleteStepError(step: string, message: string): ProjectDocumentActionResult {
+  const error = `Failed ${step}: ${message}`;
+  console.error(error);
+
+  return {
+    ok: false,
+    error,
+  };
+}
+
 function readString(formData: FormData, key: string) {
   const value = formData.get(key);
   return typeof value === "string" ? value.trim() : "";
@@ -580,7 +590,7 @@ export async function deleteProjectFile(formData: FormData) {
     .or(`source_file_id.eq.${fileId},project_file_id.eq.${fileId}`);
 
   if (countError) {
-    return { ok: false, error: countError.message } satisfies ProjectDocumentActionResult;
+    return deleteStepError("checking parsed BOQ data", countError.message);
   }
 
   if ((parsedCount || 0) > 0 && !confirmed) {
@@ -595,7 +605,7 @@ export async function deleteProjectFile(formData: FormData) {
     .or(`source_file_id.eq.${fileId},project_file_id.eq.${fileId}`);
 
   if (boqError) {
-    return { ok: false, error: boqError.message } satisfies ProjectDocumentActionResult;
+    return deleteStepError("deleting boq_items", boqError.message);
   }
 
   const { error: fileDeleteError } = await supabase
@@ -606,7 +616,7 @@ export async function deleteProjectFile(formData: FormData) {
     .eq("user_id", user.id);
 
   if (fileDeleteError) {
-    return { ok: false, error: fileDeleteError.message } satisfies ProjectDocumentActionResult;
+    return deleteStepError("deleting project_files", fileDeleteError.message);
   }
 
   const { error: storageError } = await supabase.storage
@@ -614,7 +624,7 @@ export async function deleteProjectFile(formData: FormData) {
     .remove([projectFile.storage_path]);
 
   if (storageError) {
-    return { ok: false, error: storageError.message } satisfies ProjectDocumentActionResult;
+    return deleteStepError("deleting storage object", storageError.message);
   }
 
   revalidatePath(`/projects/${projectId}`);
