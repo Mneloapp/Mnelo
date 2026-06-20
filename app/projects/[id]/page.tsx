@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { AppNav } from "@/components/app-nav";
 import { Badge, Button, Shell, StatCard } from "@/components/ui";
 import { BoqResultsTable } from "@/components/boq-results-table";
+import { DeleteFileButton } from "@/components/delete-file-button";
 import { uploadProjectDocument } from "@/app/projects/actions";
 import {
   getBoqItemsForCurrentUser,
@@ -17,10 +18,10 @@ export default async function ProjectDetailsPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; message?: string }>;
 }) {
   const { id } = await params;
-  const [{ error }, projectResult, fileResult, boqResult, learningResult] = await Promise.all([
+  const [{ error, message }, projectResult, fileResult, boqResult, learningResult] = await Promise.all([
     searchParams,
     getProjectForCurrentUser(id),
     getProjectFilesForCurrentUser(id),
@@ -148,6 +149,12 @@ export default async function ProjectDetailsPage({
           </div>
         ) : null}
 
+        {message ? (
+          <div className="mt-5 rounded-lg border border-leaf-200 bg-leaf-50 px-4 py-3 text-sm text-leaf-800">
+            {message}
+          </div>
+        ) : null}
+
         <form action={uploadProjectDocument} className="mt-5 grid gap-4 lg:grid-cols-[1fr_14rem_auto]">
           <input name="project_id" type="hidden" value={project.id} />
           <label className="block">
@@ -189,7 +196,7 @@ export default async function ProjectDetailsPage({
               <div className="divide-y divide-line">
                 {files.map((file) => (
                   <div
-                    className="grid gap-3 bg-white px-4 py-3 text-sm md:grid-cols-[1fr_10rem_7rem_9rem]"
+                    className="grid gap-3 bg-white px-4 py-3 text-sm md:grid-cols-[1fr_10rem_7rem_9rem_auto]"
                     key={file.id}
                   >
                     <div>
@@ -199,6 +206,14 @@ export default async function ProjectDetailsPage({
                     <p className="text-ink/65">{file.documentType}</p>
                     <p className="text-ink/65">{file.fileSize}</p>
                     <p className="text-ink/55">{file.uploadedAt}</p>
+                    <div className="flex items-start justify-start md:justify-end">
+                      <DeleteFileButton
+                        fileId={file.id}
+                        fileName={file.fileName}
+                        hasParsedBoq={boqItems.some((item) => item.sourceFileId === file.id)}
+                        projectId={project.id}
+                      />
+                    </div>
                   </div>
                 ))}
               </div>

@@ -534,3 +534,93 @@ export async function correctBoqClassification(formData: FormData) {
   revalidatePath("/learning");
   redirect(`/projects/${projectId}#boq`);
 }
+
+export async function deleteProjectFile(formData: FormData) {
+  const projectId = readString(formData, "project_id");
+  const fileId = readString(formData, "file_id");
+  const confirmed = readString(formData, "confirmed") === "true";
+
+  if (!projectId || !fileId) {
+    redirect(`/projects/${projectId || ""}?error=${encodeURIComponent("Missing file deletion details.")}`);
+  }
+
+  const { supabase, user, error: userError } = await getAuthenticatedUser();
+
+  if (userError || !user) {
+    redirect("/login");
+  }
+
+  const { data: projectFile, error: fileError } = await supabase
+    .from("project_files")
+    .select("id, storage_path")
+    .eq("id", fileId)
+    .eq("project_id", projectId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (fileError || !projectFile) {
+    redirect(`/projects/${projectId}?error=${encodeURIComponent(fileError?.message || "File not found.")}`);
+  }
+
+  const { count: parsedCount, error: countError } = await supabase
+    .from("boq_items")
+    .select("id", { count: "exact", head: true })
+    .eq("project_id", projectId)
+    .eq("user_id", user.id)
+    .or(`source_file_id.eq.${fileId},project_file_id.eq.${fileId}`);
+
+  if (countError) {
+    redirect(`/projects/${projectId}?error=${encodeURIComponent(countError.message)}`);
+  }
+
+  if ((parsedCount || 0) > 0 && !confirmed) {
+    redirect(
+      `/projects/${projectId}?error=${encodeURIComponent("Delete file and all parsed BOQ data?")}`,
+    );
+  }
+
+  const { error: learningError } = await supabase
+    .from("ai_training_data")
+    .delete()
+    .eq("project_id", projectId)
+    .eq("user_id", user.id)
+    .eq("source_file_id", fileId);
+
+  if (learningError) {
+    redirect(`/projects/${projectId}?error=${encodeURIComponent(learningError.message)}`);
+  }
+
+  const { error: boqError } = await supabase
+    .from("boq_items")
+    .delete()
+    .eq("project_id", projectId)
+    .eq("user_id", user.id)
+    .or(`source_file_id.eq.${fileId},project_file_id.eq.${fileId}`);
+
+  if (boqError) {
+    redirect(`/projects/${projectId}?error=${encodeURIComponent(boqError.message)}`);
+  }
+
+  const { error: fileDeleteError } = await supabase
+    .from("project_files")
+    .delete()
+    .eq("id", fileId)
+    .eq("project_id", projectId)
+    .eq("user_id", user.id);
+
+  if (fileDeleteError) {
+    redirect(`/projects/${projectId}?error=${encodeURIComponent(fileDeleteError.message)}`);
+  }
+
+  const { error: storageError } = await supabase.storage
+    .from("project-documents")
+    .remove([projectFile.storage_path]);
+
+  if (storageError) {
+    redirect(`/projects/${projectId}?error=${encodeURIComponent(storageError.message)}`);
+  }
+
+  revalidatePath(`/projects/${projectId}`);
+  revalidatePath("/learning");
+  redirect(`/projects/${projectId}?message=${encodeURIComponent("File deleted successfully.")}`);
+}
