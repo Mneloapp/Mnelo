@@ -454,7 +454,17 @@ function chooseDisplayBoqRows(rows: BoqItemRow[], validFileIds: Set<string>) {
   const unlinkedRows = rows.filter((row) => !(row.source_file_id || row.project_file_id));
   const displayRows = [...linkedRows, ...unlinkedRows];
 
-  if (linkedRows.length > 0 && linkedRows.length / rows.length < 0.75) {
+  if (linkedRows.length >= 100 || linkedRows.length / rows.length >= 0.5) {
+    if (unlinkedRows.length > 0) {
+      console.info(
+        `[boq-display] using file-linked BOQ rows and ignoring stale unlinked rows. linked=${linkedRows.length} unlinked=${unlinkedRows.length} rows=${rows.length}`,
+      );
+    }
+
+    return linkedRows;
+  }
+
+  if (linkedRows.length > 0) {
     console.info(
       `[boq-display] linked BOQ rows are a small subset of project rows. Using project-level rows to avoid hiding the latest parse. linked=${linkedRows.length} rows=${rows.length}`,
     );

@@ -799,15 +799,33 @@ async function deleteParsedBoqRowsForFile({
         .eq("user_id", userId)
         .eq("project_file_id", projectFileId),
   ];
+  let deletedLinkedRows = false;
 
   for (const deleteAttempt of deleteAttempts) {
     const { error } = await deleteAttempt();
 
     if (!error) {
-      return;
+      deletedLinkedRows = true;
+      break;
     }
 
     console.error(`Failed deleting existing parsed BOQ rows before parse: ${error.message}`);
+  }
+
+  if (!deletedLinkedRows) {
+    console.error(`Failed deleting linked BOQ rows before parse for file=${projectFileId}`);
+  }
+
+  const { error: staleUnlinkedError } = await supabase
+    .from("boq_items")
+    .delete()
+    .eq("project_id", projectId)
+    .eq("user_id", userId)
+    .is("source_file_id", null)
+    .is("project_file_id", null);
+
+  if (staleUnlinkedError) {
+    console.info(`[boq-parse] skipped stale unlinked BOQ cleanup: ${staleUnlinkedError.message}`);
   }
 }
 
