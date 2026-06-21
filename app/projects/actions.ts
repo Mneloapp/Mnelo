@@ -174,6 +174,10 @@ function predictClassification(row: Pick<ParsedBoqRow, "description" | "section_
   };
 }
 
+function inheritedDisplayGroup(row: Pick<ParsedBoqRow, "inherited_category" | "inherited_subcategory" | "section_header">) {
+  return row.inherited_category || row.inherited_subcategory || row.section_header || null;
+}
+
 function logBoqParserDebugSummary(projectId: string, rows: ParsedBoqRow[]) {
   const rowsBySheet = rows.reduce((summary, row) => {
     const sheetName = row.source_sheet_name || row.sheet_name || "Unknown";
@@ -422,7 +426,10 @@ async function saveParsedBoqRows({
         payload.rate = row.rate;
         payload.amount = row.amount;
         payload.category = prediction.predicted_category;
-        payload.subcategory = prediction.predicted_subcategory;
+        payload.subcategory =
+          optionalColumns === "basicClassification"
+            ? inheritedDisplayGroup(row) || prediction.predicted_subcategory
+            : prediction.predicted_subcategory;
         payload.confidence_score = prediction.confidence_score;
       }
 

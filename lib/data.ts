@@ -818,11 +818,13 @@ export async function getProjectSystemsForCurrentUser(projectId: string) {
       categories: Map<
         string,
         ProjectSystemCategory & {
+          firstRowNumber: number;
           subcategoryTotals: Map<string, ProjectSystemSubcategory & { unitTotals: Map<string, number> }>;
           unitTotals: Map<string, number>;
         }
       >;
       confidenceTotal: number;
+      firstRowNumber: number;
       itemCount: number;
       name: string;
       totalAmount: number;
@@ -882,11 +884,13 @@ export async function getProjectSystemsForCurrentUser(projectId: string) {
       categories: new Map<
         string,
         ProjectSystemCategory & {
+          firstRowNumber: number;
           subcategoryTotals: Map<string, ProjectSystemSubcategory & { unitTotals: Map<string, number> }>;
           unitTotals: Map<string, number>;
         }
       >(),
       confidenceTotal: 0,
+      firstRowNumber: item.sourceRowNumber || item.rowNumber,
       itemCount: 0,
       name: systemName,
       totalAmount: 0,
@@ -895,6 +899,7 @@ export async function getProjectSystemsForCurrentUser(projectId: string) {
     const category = system.categories.get(categoryName) || {
       itemCount: 0,
       items: [],
+      firstRowNumber: item.sourceRowNumber || item.rowNumber,
       name: categoryName,
       subcategories: [],
       subcategoryTotals: new Map<string, ProjectSystemSubcategory & { unitTotals: Map<string, number> }>(),
@@ -912,9 +917,11 @@ export async function getProjectSystemsForCurrentUser(projectId: string) {
     };
 
     system.itemCount += 1;
+    system.firstRowNumber = Math.min(system.firstRowNumber, item.sourceRowNumber || item.rowNumber);
     system.totalAmount += item.amount || 0;
     system.confidenceTotal += item.confidenceScore || classification.confidenceScore;
     category.itemCount += 1;
+    category.firstRowNumber = Math.min(category.firstRowNumber, item.sourceRowNumber || item.rowNumber);
     category.totalAmount += item.amount || 0;
     category.items.push(systemItem);
     subcategory.itemCount += 1;
@@ -954,14 +961,24 @@ export async function getProjectSystemsForCurrentUser(projectId: string) {
             totalAmount: category.totalAmount,
             units: sortedUnitTotals(category.unitTotals),
           }))
-          .sort((a, b) => b.itemCount - a.itemCount),
+          .sort((a, b) => {
+            const categoryA = system.categories.get(a.name);
+            const categoryB = system.categories.get(b.name);
+
+            return (categoryA?.firstRowNumber || 0) - (categoryB?.firstRowNumber || 0);
+          }),
         confidenceAverage: system.itemCount > 0 ? Math.round((system.confidenceTotal / system.itemCount) * 100) : 0,
         itemCount: system.itemCount,
         name: system.name,
         totalAmount: system.totalAmount,
         units: sortedUnitTotals(system.unitTotals),
       }))
-      .sort((a, b) => b.itemCount - a.itemCount),
+      .sort((a, b) => {
+        const systemA = systems.get(a.name);
+        const systemB = systems.get(b.name);
+
+        return (systemA?.firstRowNumber || 0) - (systemB?.firstRowNumber || 0);
+      }),
     errorMessage: filesResult.error?.message || null,
   } satisfies ProjectSystemsQueryResult;
 }
