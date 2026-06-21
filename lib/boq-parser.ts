@@ -70,6 +70,11 @@ export type BoqParserSummary = {
   ignoredRows: number;
   itemRows: number;
   needsReviewRows: number;
+  persisted?: {
+    inheritedRows: number;
+    itemRows: number;
+    totalRows: number;
+  };
   rowsSentToAi: number;
   rowsWithInheritedSection: number;
   sheetsParsed: number;

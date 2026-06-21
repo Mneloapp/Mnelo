@@ -72,8 +72,8 @@ type ClassificationPrediction = {
 };
 
 type BoqInsertMode = {
-  fileColumns: "both" | "project_file_id" | "source_file_id" | "none";
-  optionalColumns: "full" | "legacy";
+  fileColumns: "both" | "project_file_id" | "source_file_id";
+  optionalColumns: "full";
 };
 
 type BoqClassificationRow = {
@@ -449,17 +449,20 @@ async function saveParsedBoqRows({
     { fileColumns: "both", optionalColumns: "full" },
     { fileColumns: "source_file_id", optionalColumns: "full" },
     { fileColumns: "project_file_id", optionalColumns: "full" },
-    { fileColumns: "none", optionalColumns: "full" },
-    { fileColumns: "project_file_id", optionalColumns: "legacy" },
-    { fileColumns: "none", optionalColumns: "legacy" },
   ];
   let boqInsertError: string | null = null;
+  let insertedWithFileColumns: BoqInsertMode["fileColumns"] | null = null;
+
+  console.info(
+    `[boq-parse] preparing insert project=${projectId} file=${projectFileId} rows=${normalizedRows.length} items=${parserSummary.itemRows}`,
+  );
 
   for (const insertMode of insertAttempts) {
     const { error: boqError } = await supabase.from("boq_items").insert(buildBoqRows(insertMode));
 
     if (!boqError) {
       boqInsertError = null;
+      insertedWithFileColumns = insertMode.fileColumns;
       break;
     }
 
@@ -494,6 +497,35 @@ async function saveParsedBoqRows({
 
   if (boqInsertError) {
     return { error: boqInsertError, parserSummary };
+  }
+
+  const verification = await verifyParsedBoqPersistence({
+    projectFileId,
+    projectId,
+    supabase,
+    userId,
+  });
+
+  if (verification.error) {
+    return { error: verification.error, parserSummary };
+  }
+
+  parserSummary.persisted = {
+    inheritedRows: verification.inheritedRows ?? 0,
+    itemRows: verification.itemRows ?? 0,
+    totalRows: verification.totalRows ?? 0,
+  };
+
+  console.info(
+    `[boq-parse] inserted project=${projectId} file=${projectFileId} fileColumns=${insertedWithFileColumns} rows=${verification.totalRows} items=${verification.itemRows} inherited=${verification.inheritedRows}`,
+  );
+
+  if (verification.totalRows === 0) {
+    return {
+      error:
+        "BOQ parsed but no rows were persisted for this file. Check production boq_items source_file_id/project_file_id schema and RLS policies.",
+      parserSummary,
+    };
   }
 
   const itemRows = normalizedRows.filter((row) => row.row_type === "item");
@@ -538,6 +570,135 @@ async function saveParsedBoqRows({
   }
 
   return { error: null, parserSummary };
+}
+
+async function countParsedRowsForFile({
+  projectFileId,
+  projectId,
+  rowType,
+  supabase,
+  userId,
+  withInheritedSection,
+}: {
+  projectFileId: string;
+  projectId: string;
+  rowType?: BoqRowType;
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+  userId: string;
+  withInheritedSection?: boolean;
+}) {
+  const attempts = [
+    () =>
+      supabase
+        .from("boq_items")
+        .select("id", { count: "exact", head: true })
+        .eq("project_id", projectId)
+        .eq("user_id", userId)
+        .or(`source_file_id.eq.${projectFileId},project_file_id.eq.${projectFileId}`),
+    () =>
+      supabase
+        .from("boq_items")
+        .select("id", { count: "exact", head: true })
+        .eq("project_id", projectId)
+        .eq("user_id", userId)
+        .eq("project_file_id", projectFileId),
+    () =>
+      supabase
+        .from("boq_items")
+        .select("id", { count: "exact", head: true })
+        .eq("project_id", projectId)
+        .eq("user_id", userId)
+        .eq("source_file_id", projectFileId),
+  ];
+
+  let lastError: string | null = null;
+
+  for (const buildQuery of attempts) {
+    let query = buildQuery();
+
+    if (rowType) {
+      query = query.eq("row_type", rowType);
+    }
+
+    if (withInheritedSection) {
+      query = query.not("section_header", "is", null);
+    }
+
+    const { count, error } = await query;
+
+    if (!error) {
+      return { count: count || 0, error: null };
+    }
+
+    lastError = error.message;
+  }
+
+  return { count: 0, error: lastError || "Could not verify parsed BOQ rows." };
+}
+
+async function verifyParsedBoqPersistence({
+  projectFileId,
+  projectId,
+  supabase,
+  userId,
+}: {
+  projectFileId: string;
+  projectId: string;
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+  userId: string;
+}) {
+  const totalRows = await countParsedRowsForFile({ projectFileId, projectId, supabase, userId });
+
+  if (totalRows.error) {
+    console.error(`[boq-parse] failed verifying persisted rows: ${totalRows.error}`);
+    return { error: `BOQ rows were inserted but verification failed: ${totalRows.error}` };
+  }
+
+  const itemRows = await countParsedRowsForFile({ projectFileId, projectId, rowType: "item", supabase, userId });
+  const inheritedRows = await countParsedRowsForFile({
+    projectFileId,
+    projectId,
+    rowType: "item",
+    supabase,
+    userId,
+    withInheritedSection: true,
+  });
+
+  return {
+    error: null,
+    inheritedRows: inheritedRows.error ? 0 : inheritedRows.count,
+    itemRows: itemRows.error ? 0 : itemRows.count,
+    totalRows: totalRows.count,
+  };
+}
+
+async function markProjectFileParsed({
+  parserSummary,
+  projectFileId,
+  projectId,
+  supabase,
+  userId,
+}: {
+  parserSummary?: BoqParserSummary;
+  projectFileId: string;
+  projectId: string;
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+  userId: string;
+}) {
+  const { error } = await supabase
+    .from("project_files")
+    .update({
+      parse_status: "parsed",
+      parsed_at: new Date().toISOString(),
+      parsed_rows: parserSummary?.persisted?.totalRows ?? parserSummary?.totalParsedRows ?? null,
+    })
+    .eq("id", projectFileId)
+    .eq("project_id", projectId)
+    .eq("user_id", userId);
+
+  if (error) {
+    console.info(`[boq-parse] skipped project_files parse status update: ${error.message}`);
+  }
 }
 
 async function deleteParsedBoqRowsForFile({
@@ -728,6 +889,14 @@ export async function uploadProjectDocument(formData: FormData) {
       if (saveResult.error) {
         return { ok: false, error: saveResult.error, parserSummary } satisfies ProjectDocumentActionResult;
       }
+
+      await markProjectFileParsed({
+        parserSummary,
+        projectFileId: projectFile.id,
+        projectId,
+        supabase,
+        userId: user.id,
+      });
     }
 
     revalidatePath(`/projects/${projectId}`);
@@ -828,6 +997,14 @@ export async function saveBoqColumnMappingAndParse(formData: FormData) {
     return { ok: false, error: saveResult.error, parserSummary: saveResult.parserSummary } satisfies ProjectDocumentActionResult;
   }
 
+  await markProjectFileParsed({
+    parserSummary: saveResult.parserSummary,
+    projectFileId,
+    projectId,
+    supabase,
+    userId: user.id,
+  });
+
   revalidatePath(`/projects/${projectId}`);
   return {
     ok: true,
@@ -912,6 +1089,14 @@ export async function parseExistingProjectFile(formData: FormData) {
   if (saveResult.error) {
     return { ok: false, error: saveResult.error, parserSummary: saveResult.parserSummary } satisfies ProjectDocumentActionResult;
   }
+
+  await markProjectFileParsed({
+    parserSummary: saveResult.parserSummary,
+    projectFileId,
+    projectId,
+    supabase,
+    userId: user.id,
+  });
 
   revalidatePath(`/projects/${projectId}`);
   return {

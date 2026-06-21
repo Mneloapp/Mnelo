@@ -15,12 +15,19 @@ export function ParserDebugSummary({ summary }: { summary?: BoqParserSummary }) 
     ["AI queue", summary.rowsSentToAi],
     ["Needs Review", summary.needsReviewRows],
   ];
+  const persistedStats = summary.persisted
+    ? [
+        ["Persisted rows", summary.persisted.totalRows],
+        ["Persisted items", summary.persisted.itemRows],
+        ["Persisted inherited", summary.persisted.inheritedRows],
+      ]
+    : [];
 
   return (
     <details className="mt-3 rounded-lg border border-[#bbf7d0] bg-white/70 p-3 text-xs text-[#166534]">
       <summary className="cursor-pointer font-semibold">Parser debug summary</summary>
       <div className="mt-3 grid gap-2 sm:grid-cols-4">
-        {stats.map(([label, value]) => (
+        {[...stats, ...persistedStats].map(([label, value]) => (
           <div className="rounded-md bg-[#ecfdf3] px-2 py-1" key={label}>
             <span className="text-[#64748b]">{label}</span>
             <span className="ml-2 font-semibold text-[#0f172a]">{value}</span>

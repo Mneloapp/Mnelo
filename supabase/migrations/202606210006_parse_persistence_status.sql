@@ -1,6 +1,3 @@
--- Run in Supabase production if BOQ parser context columns or inherited_header source are missing.
--- Safe/idempotent: adds missing columns, backfills source sheet/row from existing sheet fields, and recreates only the check constraint.
-
 alter table public.project_files
   add column if not exists parse_status text not null default 'not_parsed',
   add column if not exists parsed_at timestamptz,
@@ -14,10 +11,9 @@ alter table public.boq_items
   add column if not exists category text,
   add column if not exists subcategory text,
   add column if not exists confidence_score numeric(5, 4),
-  add column if not exists classification_subcategory text,
-  add column if not exists classification_source text,
   add column if not exists classification_confidence numeric(5, 4),
   add column if not exists classification_reason text,
+  add column if not exists classification_source text,
   add column if not exists classification_status text not null default 'unclassified',
   add column if not exists needs_review boolean not null default false,
   add column if not exists row_type text,
@@ -27,6 +23,7 @@ alter table public.boq_items
   add column if not exists section_header text,
   add column if not exists inherited_category text,
   add column if not exists inherited_subcategory text,
+  add column if not exists classification_subcategory text,
   add column if not exists updated_at timestamptz not null default now();
 
 update public.boq_items
@@ -51,9 +48,6 @@ alter table public.boq_items
     or classification_source in ('rules', 'learned', 'ai', 'inherited_header', 'needs_review')
   );
 
-create index if not exists boq_items_source_sheet_name_idx
-  on public.boq_items (source_sheet_name);
-
 create index if not exists boq_items_source_file_id_idx
   on public.boq_items (source_file_id);
 
@@ -65,15 +59,6 @@ create index if not exists boq_items_project_file_row_type_idx
 
 create index if not exists boq_items_source_file_row_type_idx
   on public.boq_items (project_id, user_id, source_file_id, row_type);
-
-create index if not exists boq_items_section_header_idx
-  on public.boq_items (section_header);
-
-create index if not exists boq_items_classification_source_idx
-  on public.boq_items (classification_source);
-
-create index if not exists boq_items_row_type_idx
-  on public.boq_items (row_type);
 
 create index if not exists project_files_parse_status_idx
   on public.project_files (project_id, user_id, parse_status);
