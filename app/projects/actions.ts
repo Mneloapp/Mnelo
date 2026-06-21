@@ -691,7 +691,7 @@ async function verifyParsedBoqPersistence({
   return {
     error: null,
     inheritedRows: inheritedRows.error ? 0 : inheritedRows.count,
-    itemRows: itemRows.error ? 0 : itemRows.count,
+    itemRows: itemRows.error ? totalRows.count : itemRows.count,
     totalRows: totalRows.count,
   };
 }

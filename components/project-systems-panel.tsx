@@ -64,6 +64,17 @@ function draftForItem(item: SystemBoqItem, systemName: string, categoryName: str
   };
 }
 
+function displaySubcategory(item: SystemBoqItem) {
+  return (
+    item.inheritedSubcategory ||
+    item.subcategory ||
+    item.sectionHeader ||
+    item.category ||
+    item.classificationSubcategory ||
+    "Unclassified"
+  );
+}
+
 export function ProjectSystemsPanel({
   projectId,
   systems,
@@ -112,7 +123,10 @@ export function ProjectSystemsPanel({
     return map;
   }, [allRows]);
   const categoryOptions = useMemo(
-    () => Array.from(new Set(allRows.map((row) => row.category.name))).sort((a, b) => a.localeCompare(b)),
+    () =>
+      Array.from(new Set(allRows.flatMap((row) => [row.category.name, displaySubcategory(row.item)]))).sort((a, b) =>
+        a.localeCompare(b),
+      ),
     [allRows],
   );
   const filteredRows = useMemo(() => {
@@ -123,7 +137,7 @@ export function ProjectSystemsPanel({
         return false;
       }
 
-      if (categoryFilter !== "all" && row.category.name !== categoryFilter) {
+      if (categoryFilter !== "all" && row.category.name !== categoryFilter && displaySubcategory(row.item) !== categoryFilter) {
         return false;
       }
 
@@ -208,8 +222,10 @@ export function ProjectSystemsPanel({
         Description: item.description,
         Quantity: item.takeoffQuantity ?? item.quantity ?? "",
         Rate: item.rate ?? "",
-        Sheet: item.sheetName,
-        Subcategory: item.classificationSubcategory || "",
+        Row: item.sourceRowNumber ?? item.rowNumber,
+        Section: item.sectionHeader || "",
+        Sheet: item.sourceSheetName || item.sheetName,
+        Subcategory: displaySubcategory(item),
         System: system.name,
         Unit: item.takeoffUnit || item.unit || "",
       })),
@@ -524,7 +540,7 @@ export function ProjectSystemsPanel({
                     <div>
                       <h3 className="text-base font-semibold text-[#0f172a]">{system.name}</h3>
                       <p className="mt-1 text-sm text-[#64748b]">
-                        {visibleSystemRows.length} visible / {system.itemCount} total items
+                        {visibleSystemRows.length} visible / {system.itemCount} total items / {system.categories.length} section groups
                       </p>
                     </div>
                   </div>
@@ -562,7 +578,7 @@ export function ProjectSystemsPanel({
                   const subcategoryCounts = Array.from(
                     rows
                       .reduce((counts, row) => {
-                        const name = row.item.classificationSubcategory || "Unclassified";
+                        const name = displaySubcategory(row.item);
 
                         counts.set(name, (counts.get(name) || 0) + 1);
                         return counts;
@@ -628,7 +644,7 @@ export function ProjectSystemsPanel({
                                 <span className="line-clamp-2 font-medium text-[#0f172a]">{item.description}</span>
                                 <span className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[#64748b]">
                                   <span>{category.name}</span>
-                                  {item.classificationSubcategory ? <span>{item.classificationSubcategory}</span> : null}
+                                  {displaySubcategory(item) !== category.name ? <span>{displaySubcategory(item)}</span> : null}
                                   <span className="rounded-full bg-[#f8fafc] px-2 py-0.5 font-semibold text-[#64748b] ring-1 ring-[#e5e7eb]">
                                     {sourceLabel(item.classificationSource)}
                                   </span>
@@ -663,7 +679,7 @@ export function ProjectSystemsPanel({
                                   </span>
                                 )}
                               </span>
-                              <span className="text-[#64748b]">{item.classificationSubcategory || "Unclassified"}</span>
+                              <span className="text-[#64748b]">{displaySubcategory(item)}</span>
                               <span className="text-right text-[#64748b]">
                                 {(item.takeoffQuantity ?? item.quantity ?? 0).toLocaleString()}
                               </span>

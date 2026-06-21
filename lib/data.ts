@@ -444,6 +444,40 @@ function filterBoqRowsForExistingFiles(rows: BoqItemRow[], validFileIds: Set<str
   });
 }
 
+function firstMeaningfulValue(...values: Array<null | string | undefined>) {
+  return values.find((value) => {
+    const normalized = value?.trim();
+
+    return Boolean(normalized && normalized !== "General" && normalized !== "Unclassified");
+  });
+}
+
+function debugSystemDisplayRows(
+  rows: Array<{
+    categoryName: string;
+    item: BoqItem;
+    subcategoryName: string;
+    systemName: string;
+  }>,
+) {
+  if (process.env.MNELO_DEBUG_SYSTEMS !== "true") {
+    return;
+  }
+
+  console.info(
+    "[systems-display]",
+    rows.slice(0, 10).map((row) => ({
+      category: row.item.category,
+      computedGroup: row.categoryName,
+      inheritedCategory: row.item.inheritedCategory,
+      inheritedSubcategory: row.item.inheritedSubcategory,
+      sectionHeader: row.item.sectionHeader,
+      subcategory: row.subcategoryName,
+      system: row.systemName,
+    })),
+  );
+}
+
 export function mapLearningRecord(row: LearningRecordRow): LearningRecord {
   const predictedCategory = row.predicted_category || "General";
   const predictedSubcategory = row.predicted_subcategory || "Unclassified";
@@ -795,6 +829,12 @@ export async function getProjectSystemsForCurrentUser(projectId: string) {
       unitTotals: Map<string, number>;
     }
   >();
+  const debugRows: Array<{
+    categoryName: string;
+    item: BoqItem;
+    subcategoryName: string;
+    systemName: string;
+  }> = [];
 
   for (const row of rows) {
     if (row.row_type && row.row_type !== "item") {
@@ -809,10 +849,20 @@ export async function getProjectSystemsForCurrentUser(projectId: string) {
     const classification =
       excelClassification ||
       classifyBoqSystem(item.description, item.category, item.subcategory, item.classificationSubcategory);
-    const systemName = item.category && item.category !== "General" ? item.category : classification.systemName;
+    const hasManualSystem =
+      item.classificationSource === "learned" && item.category && item.category !== "General" && item.category !== NEEDS_REVIEW_SYSTEM;
+    const systemName = hasManualSystem
+      ? item.category
+      : excelClassification?.systemName || firstMeaningfulValue(item.category) || classification.systemName || NEEDS_REVIEW_SYSTEM;
     const categoryName =
-      item.subcategory && item.subcategory !== "Unclassified" ? item.subcategory : classification.categoryName;
-    const subcategoryName = item.classificationSubcategory || classification.subcategoryName || "Unclassified";
+      firstMeaningfulValue(
+        item.inheritedCategory,
+        item.sectionHeader,
+        item.subcategory,
+        systemName && systemName !== NEEDS_REVIEW_SYSTEM ? `${systemName} Equipment` : null,
+      ) || "Unclassified";
+    const subcategoryName =
+      firstMeaningfulValue(item.inheritedSubcategory, item.subcategory, item.sectionHeader, item.category) || "Unclassified";
     const takeoffQuantity =
       row.takeoff_quantity === null || row.takeoff_quantity === undefined
         ? item.quantity
@@ -823,6 +873,11 @@ export async function getProjectSystemsForCurrentUser(projectId: string) {
       takeoffQuantity,
       takeoffUnit,
     } satisfies SystemBoqItem;
+
+    if (systemName === "HVAC") {
+      debugRows.push({ categoryName, item, subcategoryName, systemName });
+    }
+
     const system = systems.get(systemName) || {
       categories: new Map<
         string,
@@ -876,6 +931,8 @@ export async function getProjectSystemsForCurrentUser(projectId: string) {
     system.categories.set(categoryName, category);
     systems.set(systemName, system);
   }
+
+  debugSystemDisplayRows(debugRows);
 
   return {
     systems: Array.from(systems.values())
