@@ -104,7 +104,16 @@ export function BoqResultsTable({
 
                 return (
                   <tr key={item.id} className="align-top transition hover:bg-leaf-50/40">
-                    <td className="min-w-72 px-5 py-4 font-medium text-ink">{item.description}</td>
+                    <td className="min-w-72 px-5 py-4 font-medium text-ink">
+                      {item.description}
+                      {(item.sourceSheetName || item.sectionHeader || item.sourceRowNumber) && (
+                        <p className="mt-1 text-xs font-normal text-ink/45">
+                          {item.sourceSheetName ? `Sheet: ${item.sourceSheetName}` : null}
+                          {item.sectionHeader ? ` · Section: ${item.sectionHeader}` : null}
+                          {item.sourceRowNumber ? ` · Row: ${item.sourceRowNumber}` : null}
+                        </p>
+                      )}
+                    </td>
                     <td className="whitespace-nowrap px-5 py-4 text-right text-ink/70">
                       {item.quantity === null ? "—" : item.quantity.toLocaleString()}
                     </td>

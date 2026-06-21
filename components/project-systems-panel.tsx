@@ -16,7 +16,7 @@ import type { ProjectSystemCategory, ProjectSystemSummary, SystemBoqItem } from 
 import { EmptyState, ErrorMessage } from "@/components/ui";
 
 const systemOptions = getSystemRuleOptions();
-const sourceOptions = ["all", "rules", "learned", "ai", "needs_review"] as const;
+const sourceOptions = ["all", "rules", "learned", "ai", "inherited_header", "needs_review"] as const;
 
 type DraftChange = {
   categoryName: string;
@@ -46,6 +46,10 @@ function sourceLabel(source: string) {
 
   if (source === "needs_review") {
     return "Needs Review";
+  }
+
+  if (source === "inherited_header") {
+    return "Inherited";
   }
 
   return "Rules";
@@ -651,6 +655,13 @@ export function ProjectSystemsPanel({
                                 {item.classificationReason ? (
                                   <span className="mt-1 block text-xs text-[#94a3b8]">{item.classificationReason}</span>
                                 ) : null}
+                                {(item.sourceSheetName || item.sectionHeader || item.sourceRowNumber) && (
+                                  <span className="mt-1 block text-xs text-[#94a3b8]">
+                                    {item.sourceSheetName ? `Sheet: ${item.sourceSheetName}` : null}
+                                    {item.sectionHeader ? ` · Section: ${item.sectionHeader}` : null}
+                                    {item.sourceRowNumber ? ` · Row: ${item.sourceRowNumber}` : null}
+                                  </span>
+                                )}
                               </span>
                               <span className="text-[#64748b]">{item.classificationSubcategory || "Unclassified"}</span>
                               <span className="text-right text-[#64748b]">

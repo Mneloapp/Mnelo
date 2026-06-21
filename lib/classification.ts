@@ -1,4 +1,4 @@
-export type ClassificationSource = "ai" | "learned" | "needs_review" | "rules";
+export type ClassificationSource = "ai" | "inherited_header" | "learned" | "needs_review" | "rules";
 
 export type SystemClassification = {
   systemName: string;
@@ -34,7 +34,7 @@ type SystemRule = {
 export const NEEDS_REVIEW_CATEGORY = "Needs review";
 export const NEEDS_REVIEW_SUBCATEGORY = "Needs review";
 export const NEEDS_REVIEW_SYSTEM = "Needs Review";
-export const classificationSources = ["rules", "learned", "ai", "needs_review"] as const;
+export const classificationSources = ["rules", "learned", "ai", "inherited_header", "needs_review"] as const;
 
 const taxonomy = [
   {
@@ -69,6 +69,7 @@ const taxonomy = [
       {
         name: "HVAC Equipment",
         subcategories: [
+          "Cooling Equipment",
           "Fan Coil Units",
           "AHU",
           "Heat Recovery Units",
@@ -412,6 +413,7 @@ const taxonomy = [
 ] satisfies TaxonomySystem[];
 
 const extraKeywordAliases = new Map<string, string[]>([
+  ["Cooling Equipment", ["cooling equipment", "cooling units", "გაგრილების მოწყობილობები", "გაგრილების დანადგარები"]],
   ["AHU", ["air handling unit", "ahu"]],
   ["Fan Coil Units", ["fcu", "fan coil"]],
   ["VRF Indoor Units", ["vrf indoor"]],
@@ -470,6 +472,13 @@ export const systemRules: SystemRule[] = taxonomy.flatMap((system) =>
 
 const taxonomyBySystem = new Map(taxonomy.map((system) => [system.name, system]));
 const knownSystemNames = new Set([...taxonomy.map((system) => system.name.toLowerCase()), NEEDS_REVIEW_SYSTEM.toLowerCase()]);
+const sheetSystemAliases = [
+  { systemName: "HVAC", aliases: ["heating&cooling", "heating cooling", "heating", "cooling", "hvac", "ventilation"] },
+  { systemName: "Plumbing", aliases: ["plumbing", "water supply", "drainage"] },
+  { systemName: "Fire Fighting", aliases: ["fire fighting", "firefighting"] },
+  { systemName: "Electrical", aliases: ["electricity", "electrical"] },
+  { systemName: "Low Current", aliases: ["fire alarm", "public address", "data", "network", "cctv", "access control", "door phone"] },
+];
 
 function tokenize(value: string) {
   return normalizeText(value)
@@ -578,6 +587,57 @@ export function isValidSubcategory(system: string | null | undefined, category: 
   return getSubcategoryOptions(system, category).includes(subcategory);
 }
 
+export function inferSystemFromSheetName(sheetName?: string | null) {
+  const normalized = normalizeText(sheetName || "").replace(/\s*&\s*/g, "&");
+
+  if (!normalized) {
+    return null;
+  }
+
+  return (
+    sheetSystemAliases.find((entry) =>
+      entry.aliases.some((alias) => {
+        const normalizedAlias = normalizeText(alias).replace(/\s*&\s*/g, "&");
+
+        return normalized === normalizedAlias || normalized.includes(normalizedAlias);
+      }),
+    )?.systemName || null
+  );
+}
+
+export function inferClassificationFromExcelContext(sheetName?: string | null, sectionHeader?: string | null): SystemClassification | null {
+  const inferredSystem = inferSystemFromSheetName(sheetName);
+  const text = [sheetName, sectionHeader].filter(Boolean).join(" ");
+  const ruleClassification = text ? classifyBoqSystem(text, inferredSystem || undefined, undefined, undefined) : null;
+  const systemName = inferredSystem || (ruleClassification?.systemName !== NEEDS_REVIEW_SYSTEM ? ruleClassification?.systemName : null);
+
+  if (!systemName) {
+    return null;
+  }
+
+  const categoryName =
+    ruleClassification && ruleClassification.systemName === systemName && ruleClassification.categoryName !== NEEDS_REVIEW_CATEGORY
+      ? ruleClassification.categoryName
+      : getDefaultCategory(systemName);
+  const subcategoryName =
+    ruleClassification &&
+    ruleClassification.systemName === systemName &&
+    ruleClassification.subcategoryName &&
+    ruleClassification.subcategoryName !== NEEDS_REVIEW_SUBCATEGORY
+      ? ruleClassification.subcategoryName
+      : sectionHeader || getDefaultSubcategory(systemName, categoryName);
+
+  return {
+    categoryName,
+    confidenceScore: sectionHeader ? 0.82 : 0.74,
+    reason: sectionHeader ? "Inherited from sheet and section header." : "Inherited from sheet name.",
+    source: "inherited_header",
+    subcategoryName,
+    supplierType: supplierTypeForSystem(systemName),
+    systemName,
+  } satisfies SystemClassification;
+}
+
 export function getDefaultCategory(system: string) {
   return getCategoryOptions(system)[0] || NEEDS_REVIEW_CATEGORY;
 }
@@ -595,7 +655,7 @@ export function classifyBoqSystem(
   existingCategory?: string | null,
   existingSubcategory?: string | null,
   existingClassificationSubcategory?: string | null,
-) {
+): SystemClassification {
   const match = systemRules
     .map((rule) => ({
       ...rule,

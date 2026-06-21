@@ -9,6 +9,7 @@ import {
   classifyBoqSystem,
   getDefaultSubcategory,
   getSystemRuleOptions,
+  inferClassificationFromExcelContext,
   NEEDS_REVIEW_CATEGORY,
   NEEDS_REVIEW_SUBCATEGORY,
   NEEDS_REVIEW_SYSTEM,
@@ -60,8 +61,13 @@ type ParsedBoqRow = {
   rate: number | null;
   amount: number | null;
   cleanup_reason?: string;
+  inherited_category?: string | null;
+  inherited_subcategory?: string | null;
   row_type?: BoqRowType;
+  section_header?: string | null;
   sheet_name: string;
+  source_row_number?: number;
+  source_sheet_name?: string;
   row_number: number;
 };
 
@@ -78,7 +84,7 @@ type MappingColumnOption = {
   value: string;
 };
 
-type ClassificationSource = "ai" | "learned" | "needs_review" | "rules";
+type ClassificationSource = "ai" | "inherited_header" | "learned" | "needs_review" | "rules";
 
 type ClassificationPrediction = {
   predicted_category: string;
@@ -108,10 +114,15 @@ type BoqClassificationRow = {
   classification_reason?: string | null;
   classification_source?: ClassificationSource | null;
   classification_subcategory?: string | null;
+  inherited_category?: string | null;
+  inherited_subcategory?: string | null;
   needs_review?: boolean | null;
   project_file_id?: string | null;
   row_type?: BoqRowType | null;
+  section_header?: string | null;
   source_file_id?: string | null;
+  source_row_number?: number | null;
+  source_sheet_name?: string | null;
 };
 
 type LearnedClassification = {
@@ -124,7 +135,7 @@ type LearnedClassification = {
 };
 
 function isClassificationSource(value: unknown): value is ClassificationSource {
-  return value === "ai" || value === "learned" || value === "needs_review" || value === "rules";
+  return value === "ai" || value === "inherited_header" || value === "learned" || value === "needs_review" || value === "rules";
 }
 
 export type ProjectDocumentActionResult = {
@@ -237,16 +248,18 @@ function uniqueColumnOptions(headers: unknown[]) {
   return Array.from(options.values());
 }
 
-function predictClassification(description: string): ClassificationPrediction {
-  const classification = classifyBoqSystem(description);
+function predictClassification(row: Pick<ParsedBoqRow, "description" | "section_header" | "sheet_name">): ClassificationPrediction {
+  const inheritedClassification = inferClassificationFromExcelContext(row.sheet_name, row.section_header);
+  const classification = inheritedClassification || classifyBoqSystem(row.description);
   const needsReview = classification.systemName === NEEDS_REVIEW_SYSTEM;
 
   return {
     classification_reason:
-      needsReview
+      classification.reason ||
+      (needsReview
         ? "Local classifier could not confidently map this item."
-        : "Matched local classification rules.",
-    classification_source: needsReview ? "needs_review" : "rules",
+        : "Matched local classification rules."),
+    classification_source: classification.source || (needsReview ? "needs_review" : "rules"),
     needs_review: needsReview,
     predicted_category: classification.systemName,
     predicted_subcategory: classification.categoryName,
@@ -258,6 +271,10 @@ function predictClassification(description: string): ClassificationPrediction {
 
 function normalizeParsedBoqRows(rows: ParsedBoqRow[]) {
   return rows.map((row) => {
+    if (row.row_type) {
+      return row;
+    }
+
     const cleanup = cleanupBoqRow({
       amount: row.amount,
       description: row.description,
@@ -421,7 +438,7 @@ function selectHeaderMatch(rows: unknown[][], mapping?: ColumnMapping | null) {
 async function readWorkbook(source: Blob) {
   try {
     const buffer = await source.arrayBuffer();
-    return XLSX.read(buffer, { cellDates: true, dense: false, type: "array" });
+    return XLSX.read(buffer, { cellDates: true, cellStyles: true, dense: false, type: "array" });
   } catch (error) {
     throw new Error(error instanceof Error ? error.message : "Unable to read Excel workbook.");
   }
@@ -434,6 +451,123 @@ function getSheetRows(sheet: XLSX.WorkSheet) {
     header: 1,
     raw: true,
   });
+}
+
+function rowText(row: unknown[]) {
+  return row
+    .map((value) => cellText(value))
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getSheetCell(sheet: XLSX.WorkSheet, rowIndex: number, columnIndex: number) {
+  return sheet[XLSX.utils.encode_cell({ c: columnIndex, r: rowIndex })] as
+    | { s?: { fill?: { fgColor?: { rgb?: string }; patternType?: string }; font?: { bold?: boolean } } }
+    | undefined;
+}
+
+function rowHasColoredFill(sheet: XLSX.WorkSheet, rowIndex: number, maxColumns: number) {
+  for (let columnIndex = 0; columnIndex < maxColumns; columnIndex += 1) {
+    const fill = getSheetCell(sheet, rowIndex, columnIndex)?.s?.fill;
+    const color = fill?.fgColor?.rgb?.toUpperCase();
+
+    if (color && color !== "FFFFFF" && color !== "FFFFFFFF" && color !== "00000000") {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function rowHasBoldText(sheet: XLSX.WorkSheet, rowIndex: number, maxColumns: number) {
+  for (let columnIndex = 0; columnIndex < maxColumns; columnIndex += 1) {
+    if (getSheetCell(sheet, rowIndex, columnIndex)?.s?.font?.bold) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function rowHasMerge(sheet: XLSX.WorkSheet, rowIndex: number) {
+  return Boolean(
+    (sheet["!merges"] || []).some((merge) => merge.s.r <= rowIndex && merge.e.r >= rowIndex && merge.e.c - merge.s.c >= 1),
+  );
+}
+
+function looksLikeSectionHeader({
+  amount,
+  description,
+  maxColumns,
+  quantity,
+  rate,
+  row,
+  rowIndex,
+  sheet,
+  unit,
+}: {
+  amount: number | null;
+  description: string;
+  maxColumns: number;
+  quantity: number | null;
+  rate: number | null;
+  row: unknown[];
+  rowIndex: number;
+  sheet: XLSX.WorkSheet;
+  unit: string | null;
+}) {
+  const text = rowText(row) || description;
+  const filledCells = row.map((value) => cellText(value)).filter(Boolean).length;
+  const hasNumericData = quantity !== null || rate !== null || amount !== null || Boolean(unit);
+
+  if (!text || hasNumericData) {
+    return false;
+  }
+
+  const visualHeader = rowHasMerge(sheet, rowIndex) || rowHasColoredFill(sheet, rowIndex, maxColumns) || rowHasBoldText(sheet, rowIndex, maxColumns);
+  const compactHeader = text.length <= 90 && filledCells <= 3;
+  const knownHeader = inferClassificationFromExcelContext(null, text);
+
+  return visualHeader || compactHeader || Boolean(knownHeader && knownHeader.systemName !== NEEDS_REVIEW_SYSTEM);
+}
+
+function buildParsedBoqRow({
+  amount,
+  currentSectionHeader,
+  description,
+  quantity,
+  rate,
+  rowNumber,
+  sheetName,
+  unit,
+}: {
+  amount: number | null;
+  currentSectionHeader: string | null;
+  description: string;
+  quantity: number | null;
+  rate: number | null;
+  rowNumber: number;
+  sheetName: string;
+  unit: string | null;
+}) {
+  const inheritedClassification = inferClassificationFromExcelContext(sheetName, currentSectionHeader);
+
+  return {
+    amount,
+    description,
+    inherited_category: inheritedClassification?.categoryName || null,
+    inherited_subcategory: inheritedClassification?.subcategoryName || currentSectionHeader || null,
+    quantity,
+    rate,
+    row_number: rowNumber,
+    section_header: currentSectionHeader,
+    sheet_name: sheetName,
+    source_row_number: rowNumber,
+    source_sheet_name: sheetName,
+    unit,
+  } satisfies ParsedBoqRow;
 }
 
 function getMappingColumns(workbook: XLSX.WorkBook) {
@@ -534,52 +668,134 @@ async function parseBoqWorkbook(source: Blob, mapping?: ColumnMapping | null) {
         continue;
       }
 
+      const maxColumns = Math.max(0, ...rows.map((row) => row.length));
+      let currentSectionHeader: string | null = null;
+
       for (const [index, row] of rows.slice(inferred.rowStartIndex).entries()) {
+        const rowIndex = inferred.rowStartIndex + index;
         const description = cellText(row[inferred.descriptionColumn]);
         const quantity = inferred.quantityColumn >= 0 ? parseNumber(row[inferred.quantityColumn]) : null;
         const unit = inferred.unitColumn >= 0 ? cellText(row[inferred.unitColumn]) || null : null;
         const rate = inferred.rateColumn >= 0 ? parseNumber(row[inferred.rateColumn]) : null;
         const amount = inferred.amountColumn >= 0 ? parseNumber(row[inferred.amountColumn]) : null;
+        const fullRowText = rowText(row);
+
+        if (
+          fullRowText &&
+          looksLikeSectionHeader({
+            amount,
+            description: fullRowText,
+            maxColumns,
+            quantity,
+            rate,
+            row,
+            rowIndex,
+            sheet,
+            unit,
+          })
+        ) {
+          currentSectionHeader = fullRowText;
+          parsedRows.push({
+            amount: null,
+            cleanup_reason: "Section header used as inherited classification context.",
+            description: fullRowText,
+            inherited_category: inferClassificationFromExcelContext(sheetName, currentSectionHeader)?.categoryName || null,
+            inherited_subcategory: inferClassificationFromExcelContext(sheetName, currentSectionHeader)?.subcategoryName || null,
+            quantity: null,
+            rate: null,
+            row_number: rowIndex + 1,
+            row_type: "header",
+            section_header: currentSectionHeader,
+            sheet_name: sheetName,
+            source_row_number: rowIndex + 1,
+            source_sheet_name: sheetName,
+            unit: null,
+          });
+          continue;
+        }
 
         if (!description) {
           continue;
         }
 
-        parsedRows.push({
+        parsedRows.push(buildParsedBoqRow({
           amount,
+          currentSectionHeader,
           description,
           quantity,
           rate,
-          row_number: inferred.rowStartIndex + index + 1,
-          sheet_name: sheetName,
+          rowNumber: inferred.rowStartIndex + index + 1,
+          sheetName,
           unit,
-        });
+        }));
       }
 
       bestScore = Math.max(bestScore, 4);
       continue;
     }
 
+    const maxColumns = Math.max(0, ...rows.map((row) => row.length));
+    let currentSectionHeader: string | null = null;
+
     for (const [index, row] of rows.slice(headerRowIndex + 1).entries()) {
+      const rowIndex = headerRowIndex + index + 1;
       const description = cellText(row[headerMatch.descriptionColumn]);
       const quantity = headerMatch.quantityColumn >= 0 ? parseNumber(row[headerMatch.quantityColumn]) : null;
       const unit = headerMatch.unitColumn >= 0 ? cellText(row[headerMatch.unitColumn]) || null : null;
       const rate = headerMatch.rateColumn >= 0 ? parseNumber(row[headerMatch.rateColumn]) : null;
       const amount = headerMatch.amountColumn >= 0 ? parseNumber(row[headerMatch.amountColumn]) : null;
+      const fullRowText = rowText(row);
+
+      if (
+        fullRowText &&
+        looksLikeSectionHeader({
+          amount,
+          description: fullRowText,
+          maxColumns,
+          quantity,
+          rate,
+          row,
+          rowIndex,
+          sheet,
+          unit,
+        })
+      ) {
+        currentSectionHeader = fullRowText;
+        const inheritedClassification = inferClassificationFromExcelContext(sheetName, currentSectionHeader);
+
+        parsedRows.push({
+          amount: null,
+          cleanup_reason: "Section header used as inherited classification context.",
+          description: fullRowText,
+          inherited_category: inheritedClassification?.categoryName || null,
+          inherited_subcategory: inheritedClassification?.subcategoryName || null,
+          quantity: null,
+          rate: null,
+          row_number: rowIndex + 1,
+          row_type: "header",
+          section_header: currentSectionHeader,
+          sheet_name: sheetName,
+          source_row_number: rowIndex + 1,
+          source_sheet_name: sheetName,
+          unit: null,
+        });
+        continue;
+      }
 
       if (!description) {
         continue;
       }
 
-      parsedRows.push({
+      parsedRows.push(buildParsedBoqRow({
+        amount,
+        currentSectionHeader,
         description,
         quantity,
         unit,
         rate,
-        amount,
-        sheet_name: sheetName,
-        row_number: headerRowIndex + index + 2,
-      });
+        sheetName,
+        rowNumber: headerRowIndex + index + 2,
+      }));
     }
   }
 
@@ -652,7 +868,7 @@ async function saveParsedBoqRows({
       const rowType = row.row_type || "item";
       const prediction =
         rowType === "item"
-          ? predictClassification(row.description)
+          ? predictClassification(row)
           : ({
               classification_reason: row.cleanup_reason || "Cleanup marked this row as non-item.",
               classification_source: "needs_review",
@@ -684,8 +900,13 @@ async function saveParsedBoqRows({
         payload.classification_source = prediction.classification_source;
         payload.classification_status = prediction.needs_review ? "needs_review" : "classified";
         payload.cleanup_reason = row.cleanup_reason;
+        payload.inherited_category = row.inherited_category;
+        payload.inherited_subcategory = row.inherited_subcategory;
         payload.needs_review = prediction.needs_review;
         payload.row_type = rowType;
+        payload.section_header = row.section_header;
+        payload.source_row_number = row.source_row_number || row.row_number;
+        payload.source_sheet_name = row.source_sheet_name || row.sheet_name;
       }
 
       if (fileColumns === "both" || fileColumns === "project_file_id") {
@@ -731,8 +952,13 @@ async function saveParsedBoqRows({
       boqError.message.includes("classification_source") ||
       boqError.message.includes("classification_status") ||
       boqError.message.includes("cleanup_reason") ||
+      boqError.message.includes("inherited_category") ||
+      boqError.message.includes("inherited_subcategory") ||
       boqError.message.includes("needs_review") ||
       boqError.message.includes("row_type") ||
+      boqError.message.includes("section_header") ||
+      boqError.message.includes("source_row_number") ||
+      boqError.message.includes("source_sheet_name") ||
       boqError.message.includes("confidence_score");
 
     if (!canRetrySchemaFallback) {
@@ -752,7 +978,7 @@ async function saveParsedBoqRows({
 
   const { error: learningError } = await supabase.from("ai_training_data").insert(
     itemRows.map((row) => {
-      const prediction = predictClassification(row.description);
+      const prediction = predictClassification(row);
 
       return {
         project_id: projectId,
@@ -1363,8 +1589,8 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
 
   const boqResult = await supabase
     .from("boq_items")
-    .select(
-      "id, description, quantity, unit, amount, category, subcategory, classification_subcategory, classification_confidence, classification_reason, classification_source, needs_review, row_type",
+      .select(
+      "id, description, quantity, unit, amount, category, subcategory, classification_subcategory, classification_confidence, classification_reason, classification_source, needs_review, row_type, source_sheet_name, source_row_number, section_header, inherited_category, inherited_subcategory",
     )
     .eq("project_id", projectId)
     .eq("user_id", user.id)
@@ -1383,7 +1609,12 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
       error.message.includes("classification_confidence") ||
       error.message.includes("classification_reason") ||
       error.message.includes("classification_source") ||
-      error.message.includes("needs_review"))
+      error.message.includes("needs_review") ||
+      error.message.includes("source_sheet_name") ||
+      error.message.includes("source_row_number") ||
+      error.message.includes("section_header") ||
+      error.message.includes("inherited_category") ||
+      error.message.includes("inherited_subcategory"))
   ) {
     if (error.message.includes("row_type")) {
       return {
@@ -1433,7 +1664,7 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
     }
 
     if (
-      (persistedSource === "learned" || persistedSource === "ai") &&
+      (persistedSource === "learned" || persistedSource === "ai" || persistedSource === "inherited_header") &&
       row.category &&
       row.subcategory &&
       !row.needs_review &&
@@ -1455,9 +1686,13 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
       };
     }
 
+    const inheritedClassification = inferClassificationFromExcelContext(row.source_sheet_name, row.section_header);
     const localClassification =
-      learnedClassification || classifyBoqSystem(row.description, row.category, row.subcategory, row.classification_subcategory);
-    const source = (localClassification.systemName === NEEDS_REVIEW_SYSTEM ? "needs_review" : "rules") satisfies ClassificationSource;
+      learnedClassification ||
+      inheritedClassification ||
+      classifyBoqSystem(row.description, row.category, row.subcategory, row.classification_subcategory);
+    const source: ClassificationSource =
+      localClassification.source || (localClassification.systemName === NEEDS_REVIEW_SYSTEM ? "needs_review" : "rules");
 
     return {
       classification: {
@@ -1465,6 +1700,8 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
         reason:
           source === "needs_review"
               ? "Local classifier could not confidently map this item."
+              : source === "inherited_header"
+                ? "Inherited from sheet and section header."
               : "Matched local classification rules.",
         source,
       } satisfies SystemClassification,

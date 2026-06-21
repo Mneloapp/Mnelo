@@ -19,12 +19,17 @@ export type BoqItem = {
   classificationSubcategory: string | null;
   confidenceScore: number;
   classificationReason: string | null;
-  classificationSource: "ai" | "learned" | "needs_review" | "rules";
+  classificationSource: "ai" | "inherited_header" | "learned" | "needs_review" | "rules";
   needsReview: boolean;
   cleanupReason: string | null;
+  inheritedCategory: string | null;
+  inheritedSubcategory: string | null;
   rowType: BoqRowType;
   sheetName: string;
   rowNumber: number;
+  sectionHeader: string | null;
+  sourceRowNumber: number | null;
+  sourceSheetName: string | null;
   createdAt: string;
 };
 
@@ -113,8 +118,13 @@ export type BoqItemRow = {
   classification_source?: string | null;
   classification_subcategory?: string | null;
   cleanup_reason?: string | null;
+  inherited_category?: string | null;
+  inherited_subcategory?: string | null;
   needs_review?: boolean | null;
   row_type?: string | null;
+  section_header?: string | null;
+  source_row_number?: number | null;
+  source_sheet_name?: string | null;
   takeoff_quantity?: number | null;
   takeoff_unit?: string | null;
   sheet_name: string;
@@ -368,6 +378,7 @@ export function mapBoqItem(row: BoqItemRow): BoqItem {
       : "item";
   const classificationSource =
     row.classification_source === "ai" ||
+    row.classification_source === "inherited_header" ||
     row.classification_source === "learned" ||
     row.classification_source === "rules" ||
     row.classification_source === "needs_review"
@@ -392,10 +403,15 @@ export function mapBoqItem(row: BoqItemRow): BoqItem {
     classificationReason: row.classification_reason || null,
     classificationSource,
     cleanupReason: row.cleanup_reason || null,
+    inheritedCategory: row.inherited_category || null,
+    inheritedSubcategory: row.inherited_subcategory || null,
     needsReview: Boolean(row.needs_review) || classificationSource === "needs_review" || row.category === NEEDS_REVIEW_SYSTEM,
     rowType,
     sheetName: row.sheet_name,
     rowNumber: row.row_number,
+    sectionHeader: row.section_header || null,
+    sourceRowNumber: row.source_row_number === null || row.source_row_number === undefined ? null : Number(row.source_row_number),
+    sourceSheetName: row.source_sheet_name || null,
     createdAt: formatDate(row.created_at),
   };
 }
