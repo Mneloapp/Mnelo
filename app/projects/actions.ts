@@ -7,6 +7,8 @@ import { classifyBoqItemsWithAi, isAiClassificationConfigured } from "@/lib/ai-c
 import { cleanupBoqRow, type BoqRowType } from "@/lib/boq-cleanup";
 import {
   classifyBoqSystem,
+  getSystemRuleOptions,
+  NEEDS_REVIEW_CATEGORY,
   NEEDS_REVIEW_SYSTEM,
   normalizeTakeoffUnit,
   type SystemClassification,
@@ -103,7 +105,9 @@ type BoqClassificationRow = {
   classification_reason?: string | null;
   classification_source?: ClassificationSource | null;
   needs_review?: boolean | null;
+  project_file_id?: string | null;
   row_type?: BoqRowType | null;
+  source_file_id?: string | null;
 };
 
 type LearnedClassification = {
@@ -1706,6 +1710,202 @@ export async function correctBoqItemSystemClassification(formData: FormData) {
   } catch (error) {
     console.error(error);
     return actionError(error, "Classification correction failed.");
+  }
+}
+
+type BulkManualClassificationChange = {
+  categoryName: string;
+  itemId: string;
+  needsReview: boolean;
+  systemName: string;
+};
+
+function parseBulkManualClassificationChanges(formData: FormData) {
+  const changesJson = readString(formData, "changes");
+
+  if (changesJson) {
+    try {
+      const parsed = JSON.parse(changesJson) as Array<Partial<BulkManualClassificationChange>>;
+
+      return parsed
+        .map((change) => ({
+          categoryName: String(change.categoryName || "").trim(),
+          itemId: String(change.itemId || "").trim(),
+          needsReview: Boolean(change.needsReview),
+          systemName: String(change.systemName || "").trim(),
+        }))
+        .filter((change) => change.itemId && change.systemName && change.categoryName);
+    } catch {
+      return [];
+    }
+  }
+
+  const systemName = readString(formData, "system_name");
+  const categoryName = readString(formData, "category_name") || defaultCategoryForSystemName(systemName);
+  const needsReviewMode = readString(formData, "needs_review_mode");
+  const needsReview = needsReviewMode === "mark";
+  const itemIds = formData
+    .getAll("item_ids")
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+
+  return itemIds
+    .map((itemId) => ({
+      categoryName,
+      itemId,
+      needsReview,
+      systemName,
+    }))
+    .filter((change) => change.itemId && change.systemName && change.categoryName);
+}
+
+function defaultCategoryForSystemName(systemName: string) {
+  return getSystemRuleOptions().find((option) => option.systemName === systemName)?.categoryName || NEEDS_REVIEW_CATEGORY;
+}
+
+export async function bulkCorrectBoqItemClassifications(formData: FormData) {
+  try {
+    const projectId = readString(formData, "project_id");
+    const changes = parseBulkManualClassificationChanges(formData);
+
+    if (!projectId || changes.length === 0) {
+      return { ok: false, error: "Select BOQ items and choose a system/category before saving." } satisfies ProjectDocumentActionResult;
+    }
+
+    const { supabase, user, error: userError } = await getAuthenticatedUser();
+
+    if (userError || !user) {
+      return { ok: false, error: "Sign in to classify BOQ items." } satisfies ProjectDocumentActionResult;
+    }
+
+    const itemIds = Array.from(new Set(changes.map((change) => change.itemId)));
+    const changesById = new Map(changes.map((change) => [change.itemId, change]));
+    const { data: rows, error: rowsError } = await supabase
+      .from("boq_items")
+      .select("id, description, quantity, unit, amount, category, subcategory, source_file_id, project_file_id, row_type")
+      .eq("project_id", projectId)
+      .eq("user_id", user.id)
+      .eq("row_type", "item")
+      .in("id", itemIds);
+
+    if (rowsError) {
+      return { ok: false, error: rowsError.message } satisfies ProjectDocumentActionResult;
+    }
+
+    const itemRows = ((rows || []) as BoqClassificationRow[]).filter((row) => row.row_type === "item");
+
+    if (itemRows.length === 0) {
+      return { ok: false, error: "No editable BOQ item rows were found." } satisfies ProjectDocumentActionResult;
+    }
+
+    const classifications = itemRows.map((row) => {
+      const change = changesById.get(row.id);
+
+      return {
+        categoryName: change?.categoryName || NEEDS_REVIEW_CATEGORY,
+        confidenceScore: 1,
+        reason: "Manual bulk correction",
+        source: "learned" as const,
+        supplierType: "User corrected supplier",
+        systemName: change?.systemName || NEEDS_REVIEW_SYSTEM,
+      } satisfies SystemClassification;
+    });
+    const { categoryIdsByKey, systemIdsByName } = await getSystemReferenceMaps({
+      classifications,
+      projectId,
+      supabase,
+      userId: user.id,
+    });
+    let updatedCount = 0;
+    let firstError: string | null = null;
+
+    for (let index = 0; index < itemRows.length; index += 25) {
+      const batch = itemRows.slice(index, index + 25);
+      const results = await Promise.all(
+        batch.map((row) => {
+          const rowIndex = itemRows.findIndex((candidate) => candidate.id === row.id);
+          const classification = classifications[rowIndex];
+          const change = changesById.get(row.id);
+          const systemId = systemIdsByName.get(classification.systemName);
+          const categoryId = systemId ? categoryIdsByKey.get(`${systemId}:${classification.categoryName}`) : undefined;
+
+          return updateBoqItemClassification({
+            categoryId,
+            classification,
+            needsReviewOverride: change?.needsReview ?? false,
+            row,
+            supabase,
+            systemId,
+          });
+        }),
+      );
+
+      for (const updateError of results) {
+        if (updateError) {
+          firstError ||= updateError;
+          continue;
+        }
+
+        updatedCount += 1;
+      }
+    }
+
+    const learningRows = itemRows.map((row) => {
+      const change = changesById.get(row.id);
+      const previousClassification = classifyBoqSystem(row.description, row.category, row.subcategory);
+
+      return {
+        project_id: projectId,
+        user_id: user.id,
+        source_file_id: row.source_file_id || row.project_file_id || null,
+        source_type: "bulk_system_classification_correction",
+        source_id: row.id,
+        item_description: row.description,
+        predicted_category: row.category || previousClassification.systemName,
+        predicted_subcategory: row.subcategory || previousClassification.categoryName,
+        predicted_supplier_type: previousClassification.supplierType,
+        confidence_score: previousClassification.confidenceScore,
+        user_corrected_category: change?.systemName,
+        user_corrected_subcategory: change?.categoryName,
+        final_category: change?.systemName,
+        final_subcategory: change?.categoryName,
+        input: {
+          description: row.description,
+          previous_category: row.category,
+          previous_subcategory: row.subcategory,
+        },
+        output: {
+          category: change?.categoryName,
+          needs_review: change?.needsReview,
+          system: change?.systemName,
+        },
+        feedback: "Manual bulk correction",
+      };
+    });
+    const { error: learningError } = await supabase.from("ai_training_data").insert(learningRows);
+
+    if (learningError) {
+      console.error(`Failed saving bulk classification learning records: ${learningError.message}`);
+    }
+
+    revalidatePath(`/projects/${projectId}`);
+    revalidatePath("/boq");
+    revalidatePath("/learning");
+
+    if (updatedCount === 0) {
+      return { ok: false, error: firstError || "No BOQ items were updated." } satisfies ProjectDocumentActionResult;
+    }
+
+    return {
+      ok: true,
+      message:
+        updatedCount === itemRows.length
+          ? `Saved ${updatedCount} manual classification changes.`
+          : `Saved ${updatedCount} of ${itemRows.length} manual classification changes. ${firstError || ""}`.trim(),
+    } satisfies ProjectDocumentActionResult;
+  } catch (error) {
+    console.error(error);
+    return actionError(error, "Bulk classification save failed.");
   }
 }
 
