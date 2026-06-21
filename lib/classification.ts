@@ -3,7 +3,13 @@ export type SystemClassification = {
   categoryName: string;
   supplierType: string;
   confidenceScore: number;
+  reason?: string | null;
+  source?: "ai" | "learned" | "needs_review" | "rules";
 };
+
+export const NEEDS_REVIEW_CATEGORY = "Needs review";
+export const NEEDS_REVIEW_SYSTEM = "Needs Review";
+export const classificationSources = ["rules", "learned", "ai", "needs_review"] as const;
 
 type SystemRule = {
   systemName: string;
@@ -540,10 +546,16 @@ function scoreRule(description: string, rule: SystemRule) {
 }
 
 export function getSystemRuleOptions() {
-  return systemRules.map((rule) => ({
-    categoryName: rule.categoryName,
-    systemName: rule.systemName,
-  }));
+  return [
+    ...systemRules.map((rule) => ({
+      categoryName: rule.categoryName,
+      systemName: rule.systemName,
+    })),
+    {
+      categoryName: NEEDS_REVIEW_CATEGORY,
+      systemName: NEEDS_REVIEW_SYSTEM,
+    },
+  ];
 }
 
 export function classifyBoqSystem(description: string, existingCategory?: string | null, existingSubcategory?: string | null) {
@@ -573,10 +585,10 @@ export function classifyBoqSystem(description: string, existingCategory?: string
   }
 
   return {
-    categoryName: existingSubcategory && existingSubcategory !== "Unclassified" ? existingSubcategory : "Needs review",
+    categoryName: existingSubcategory && existingSubcategory !== "Unclassified" ? existingSubcategory : NEEDS_REVIEW_CATEGORY,
     confidenceScore: 0.18,
     supplierType: "Needs review",
-    systemName: existingCategory && existingCategory !== "General" ? existingCategory : "Needs Review",
+    systemName: existingCategory && existingCategory !== "General" ? existingCategory : NEEDS_REVIEW_SYSTEM,
   } satisfies SystemClassification;
 }
 

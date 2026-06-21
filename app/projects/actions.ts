@@ -4,7 +4,12 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import * as XLSX from "xlsx";
 import { classifyBoqItemsWithAi, isAiClassificationConfigured } from "@/lib/ai-classifier";
-import { classifyBoqSystem, normalizeTakeoffUnit } from "@/lib/classification";
+import {
+  classifyBoqSystem,
+  NEEDS_REVIEW_SYSTEM,
+  normalizeTakeoffUnit,
+  type SystemClassification,
+} from "@/lib/classification";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { DocumentType } from "@/lib/data";
 
@@ -64,11 +69,16 @@ type MappingColumnOption = {
   value: string;
 };
 
+type ClassificationSource = "ai" | "learned" | "needs_review" | "rules";
+
 type ClassificationPrediction = {
   predicted_category: string;
   predicted_subcategory: string;
   predicted_supplier_type: string;
   confidence_score: number;
+  classification_reason: string;
+  classification_source: ClassificationSource;
+  needs_review: boolean;
 };
 
 type BoqInsertMode = {
@@ -206,8 +216,15 @@ function uniqueColumnOptions(headers: unknown[]) {
 
 function predictClassification(description: string): ClassificationPrediction {
   const classification = classifyBoqSystem(description);
+  const needsReview = classification.systemName === NEEDS_REVIEW_SYSTEM;
 
   return {
+    classification_reason:
+      needsReview
+        ? "Local classifier could not confidently map this item."
+        : "Matched local classification rules.",
+    classification_source: needsReview ? "needs_review" : "rules",
+    needs_review: needsReview,
     predicted_category: classification.systemName,
     predicted_subcategory: classification.categoryName,
     predicted_supplier_type: classification.supplierType,
@@ -606,6 +623,10 @@ async function saveParsedBoqRows({
         payload.category = prediction.predicted_category;
         payload.subcategory = prediction.predicted_subcategory;
         payload.confidence_score = prediction.confidence_score;
+        payload.classification_reason = prediction.classification_reason;
+        payload.classification_source = prediction.classification_source;
+        payload.classification_status = prediction.needs_review ? "needs_review" : "classified";
+        payload.needs_review = prediction.needs_review;
       }
 
       if (fileColumns === "both" || fileColumns === "project_file_id") {
@@ -646,6 +667,10 @@ async function saveParsedBoqRows({
       boqError.message.includes("amount") ||
       boqError.message.includes("category") ||
       boqError.message.includes("subcategory") ||
+      boqError.message.includes("classification_reason") ||
+      boqError.message.includes("classification_source") ||
+      boqError.message.includes("classification_status") ||
+      boqError.message.includes("needs_review") ||
       boqError.message.includes("confidence_score");
 
     if (!canRetrySchemaFallback) {
@@ -1150,15 +1175,22 @@ async function updateBoqItemClassification({
   row,
   supabase,
   systemId,
+  needsReviewOverride,
 }: {
   categoryId?: string;
-  classification: ReturnType<typeof classifyBoqSystem>;
+  classification: SystemClassification;
+  needsReviewOverride?: boolean;
   row: BoqClassificationRow;
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
   systemId?: string;
 }) {
   const takeoffQuantity = row.quantity === null || row.quantity === undefined ? null : Number(row.quantity || 0);
   const takeoffUnit = normalizeTakeoffUnit(row.unit);
+  const classificationSource =
+    classification.source || (classification.systemName === NEEDS_REVIEW_SYSTEM ? "needs_review" : "rules");
+  const needsReview =
+    needsReviewOverride ??
+    (classification.systemName === NEEDS_REVIEW_SYSTEM || classificationSource === "needs_review");
   const basePayload = {
     category: classification.systemName,
     confidence_score: classification.confidenceScore,
@@ -1168,16 +1200,23 @@ async function updateBoqItemClassification({
     {
       ...basePayload,
       classification_confidence: classification.confidenceScore,
-      classification_status: "classified",
+      classification_reason: classification.reason || null,
+      classification_source: classificationSource,
+      classification_status: needsReview ? "needs_review" : "classified",
+      needs_review: needsReview,
       system_category_id: categoryId || null,
       system_id: systemId || null,
       takeoff_quantity: takeoffQuantity,
       takeoff_unit: takeoffUnit,
+      updated_at: new Date().toISOString(),
     },
     {
       ...basePayload,
       classification_confidence: classification.confidenceScore,
-      classification_status: "classified",
+      classification_reason: classification.reason || null,
+      classification_source: classificationSource,
+      classification_status: needsReview ? "needs_review" : "classified",
+      needs_review: needsReview,
       takeoff_quantity: takeoffQuantity,
       takeoff_unit: takeoffUnit,
     },
@@ -1205,6 +1244,10 @@ async function updateBoqItemClassification({
       error.message.includes("system_id") ||
       error.message.includes("takeoff_quantity") ||
       error.message.includes("takeoff_unit") ||
+      error.message.includes("classification_source") ||
+      error.message.includes("classification_reason") ||
+      error.message.includes("needs_review") ||
+      error.message.includes("updated_at") ||
       error.message.includes("confidence_score");
 
     if (!canRetrySchemaFallback) {
@@ -1284,12 +1327,23 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
   }
 
   const learnedClassifications = await getLearnedClassifications(supabase, user.id);
-  const classificationSources = rows.map((row) => {
+  const classificationSources: Array<{ classification: SystemClassification; source: ClassificationSource }> = rows.map((row) => {
     const learnedClassification = findLearnedClassification(row.description, learnedClassifications);
+    const localClassification = learnedClassification || classifyBoqSystem(row.description, row.category, row.subcategory);
+    const source = (learnedClassification ? "learned" : localClassification.systemName === NEEDS_REVIEW_SYSTEM ? "needs_review" : "rules") satisfies ClassificationSource;
 
     return {
-      classification: learnedClassification || classifyBoqSystem(row.description, row.category, row.subcategory),
-      source: learnedClassification ? "learned" : "rules",
+      classification: {
+        ...localClassification,
+        reason:
+          source === "learned"
+            ? "Matched a previous user correction."
+            : source === "needs_review"
+              ? "Local classifier could not confidently map this item."
+              : "Matched local classification rules.",
+        source,
+      } satisfies SystemClassification,
+      source,
     };
   });
   const classifications = classificationSources.map((classificationSource) => classificationSource.classification);
@@ -1302,14 +1356,15 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
       .filter(
         (candidate) =>
           candidate.source !== "learned" &&
-          (candidate.classification.systemName === "Needs Review" || candidate.classification.confidenceScore < 0.86),
+          (candidate.classification.systemName === NEEDS_REVIEW_SYSTEM || candidate.classification.confidenceScore < 0.7),
       );
 
-    for (let index = 0; index < aiCandidates.length; index += 40) {
-      const batch = aiCandidates.slice(index, index + 40);
+    console.log(`BOQ AI classification fallback: ${aiCandidates.length} item(s), ${Math.ceil(aiCandidates.length / 20)} batch(es).`);
+
+    for (let index = 0; index < aiCandidates.length; index += 20) {
+      const batch = aiCandidates.slice(index, index + 20);
       const result = await classifyBoqItemsWithAi(
         batch.map((candidate) => ({
-          amount: candidate.row.amount,
           currentCategory: candidate.row.subcategory,
           currentSystem: candidate.row.category,
           description: candidate.row.description,
@@ -1321,8 +1376,7 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
 
       if (result.error) {
         aiError ||= result.error;
-        console.error(result.error);
-        continue;
+        console.error(`BOQ AI classification batch failed: ${result.error}`);
       }
 
       for (const candidate of batch) {
@@ -1334,9 +1388,7 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
 
         const currentClassification = classifications[candidate.index];
         const aiIsUseful =
-          aiClassification.systemName !== "Needs Review" ||
-          currentClassification.systemName === "Needs Review" ||
-          aiClassification.confidenceScore > currentClassification.confidenceScore;
+          currentClassification.source !== "learned" && currentClassification.confidenceScore < 0.7;
 
         if (aiIsUseful) {
           classifications[candidate.index] = aiClassification;
@@ -1345,7 +1397,8 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
       }
     }
   } else {
-    aiError = "OPENAI_API_KEY is not configured. Used local learning and rule-based classification only.";
+    aiError = "AI unavailable: OPENAI_API_KEY is not configured. Local fallback used.";
+    console.log("BOQ AI classification skipped: OPENAI_API_KEY is not configured.");
   }
   const { categoryIdsByKey, systemIdsByName } = await getSystemReferenceMaps({
     classifications,
@@ -1376,6 +1429,7 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
         updateBoqItemClassification({
           categoryId: job.categoryId,
           classification: job.classification,
+          needsReviewOverride: job.classification.source === "learned" ? false : undefined,
           row: job.row,
           supabase,
           systemId: job.systemId,
@@ -1419,6 +1473,7 @@ export async function correctBoqItemSystemClassification(formData: FormData) {
     const itemId = readString(formData, "item_id");
     const systemName = readString(formData, "system_name");
     const categoryName = readString(formData, "category_name");
+    const needsReview = readString(formData, "needs_review") === "true";
 
     if (!projectId || !itemId || !systemName || !categoryName) {
       return { ok: false, error: "Choose a system and category before saving." } satisfies ProjectDocumentActionResult;
@@ -1450,6 +1505,8 @@ export async function correctBoqItemSystemClassification(formData: FormData) {
     const classification = {
       categoryName,
       confidenceScore: 1,
+      reason: "User confirmed this classification.",
+      source: "learned" as const,
       supplierType: "User corrected supplier",
       systemName,
     };
@@ -1464,6 +1521,7 @@ export async function correctBoqItemSystemClassification(formData: FormData) {
     const updateError = await updateBoqItemClassification({
       categoryId,
       classification,
+      needsReviewOverride: needsReview,
       row: row as BoqClassificationRow,
       supabase,
       systemId,

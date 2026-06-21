@@ -1,4 +1,4 @@
-import { classifyBoqSystem, normalizeTakeoffUnit } from "@/lib/classification";
+import { classifyBoqSystem, NEEDS_REVIEW_SYSTEM, normalizeTakeoffUnit } from "@/lib/classification";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export type ProjectStatus = "Draft" | "Estimating" | "Procurement" | "Awarded";
@@ -16,6 +16,9 @@ export type BoqItem = {
   category: string;
   subcategory: string;
   confidenceScore: number;
+  classificationReason: string | null;
+  classificationSource: "ai" | "learned" | "needs_review" | "rules";
+  needsReview: boolean;
   sheetName: string;
   rowNumber: number;
   createdAt: string;
@@ -102,6 +105,9 @@ export type BoqItemRow = {
   category?: string | null;
   subcategory?: string | null;
   confidence_score?: number | null;
+  classification_reason?: string | null;
+  classification_source?: string | null;
+  needs_review?: boolean | null;
   takeoff_quantity?: number | null;
   takeoff_unit?: string | null;
   sheet_name: string;
@@ -329,6 +335,16 @@ export function mapProjectFile(row: ProjectFileRow): ProjectFile {
 }
 
 export function mapBoqItem(row: BoqItemRow): BoqItem {
+  const classificationSource =
+    row.classification_source === "ai" ||
+    row.classification_source === "learned" ||
+    row.classification_source === "rules" ||
+    row.classification_source === "needs_review"
+      ? row.classification_source
+      : row.category === NEEDS_REVIEW_SYSTEM
+        ? "needs_review"
+        : "rules";
+
   return {
     id: row.id,
     projectId: row.project_id,
@@ -341,6 +357,9 @@ export function mapBoqItem(row: BoqItemRow): BoqItem {
     category: row.category || "General",
     subcategory: row.subcategory || "Unclassified",
     confidenceScore: Number(row.confidence_score || 0),
+    classificationReason: row.classification_reason || null,
+    classificationSource,
+    needsReview: Boolean(row.needs_review) || classificationSource === "needs_review" || row.category === NEEDS_REVIEW_SYSTEM,
     sheetName: row.sheet_name,
     rowNumber: row.row_number,
     createdAt: formatDate(row.created_at),

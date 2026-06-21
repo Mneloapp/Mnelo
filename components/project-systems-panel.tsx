@@ -2,16 +2,32 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Download, Layers3, Save, Sparkles } from "lucide-react";
+import { AlertCircle, Download, Layers3, Save, Sparkles } from "lucide-react";
 import { classifyProjectBoqItems, correctBoqItemSystemClassification } from "@/app/projects/actions";
-import { getSystemRuleOptions } from "@/lib/classification";
+import { getSystemRuleOptions, NEEDS_REVIEW_CATEGORY } from "@/lib/classification";
 import type { ProjectSystemSummary } from "@/lib/data";
 import { EmptyState, ErrorMessage } from "@/components/ui";
 
 const systemOptions = getSystemRuleOptions();
 
 function defaultCategoryForSystem(systemName: string) {
-  return systemOptions.find((option) => option.systemName === systemName)?.categoryName || "Needs review";
+  return systemOptions.find((option) => option.systemName === systemName)?.categoryName || NEEDS_REVIEW_CATEGORY;
+}
+
+function sourceLabel(source: string) {
+  if (source === "ai") {
+    return "AI";
+  }
+
+  if (source === "learned") {
+    return "Learned";
+  }
+
+  if (source === "needs_review") {
+    return "Needs Review";
+  }
+
+  return "Rules";
 }
 
 export function ProjectSystemsPanel({
@@ -172,7 +188,7 @@ export function ProjectSystemsPanel({
               </div>
 
               <div className="mt-4 overflow-x-auto rounded-xl border border-[#e5e7eb] bg-white">
-                <div className="grid grid-cols-[minmax(22rem,1fr)_7rem_5rem_7rem_minmax(18rem,22rem)] gap-3 bg-[#fbfdfb] px-4 py-3 text-xs font-semibold uppercase tracking-[0.12em] text-[#64748b]">
+                <div className="grid grid-cols-[minmax(22rem,1fr)_7rem_5rem_7rem_minmax(20rem,24rem)] gap-3 bg-[#fbfdfb] px-4 py-3 text-xs font-semibold uppercase tracking-[0.12em] text-[#64748b]">
                   <span>Product / BOQ item</span>
                   <span className="text-right">Quantity</span>
                   <span>Unit</span>
@@ -183,7 +199,7 @@ export function ProjectSystemsPanel({
                   {system.categories.flatMap((category) =>
                     category.items.map((item) => (
                       <form
-                        className="grid grid-cols-[minmax(22rem,1fr)_7rem_5rem_7rem_minmax(18rem,22rem)] gap-3 px-4 py-3 text-sm"
+                        className="grid grid-cols-[minmax(22rem,1fr)_7rem_5rem_7rem_minmax(20rem,24rem)] gap-3 px-4 py-3 text-sm"
                         key={item.id}
                         onSubmit={async (event) => {
                           event.preventDefault();
@@ -227,7 +243,24 @@ export function ProjectSystemsPanel({
                       >
                         <span className="min-w-0">
                           <span className="line-clamp-2 font-medium text-[#0f172a]">{item.description}</span>
-                          <span className="mt-1 block text-xs text-[#64748b]">{category.name}</span>
+                          <span className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[#64748b]">
+                            <span>{category.name}</span>
+                            <span className="rounded-full bg-[#f8fafc] px-2 py-0.5 font-semibold text-[#64748b] ring-1 ring-[#e5e7eb]">
+                              {sourceLabel(item.classificationSource)}
+                            </span>
+                            <span className="rounded-full bg-[#f8fafc] px-2 py-0.5 font-semibold text-[#64748b] ring-1 ring-[#e5e7eb]">
+                              {Math.round(item.confidenceScore * 100)}%
+                            </span>
+                            {item.needsReview ? (
+                              <span className="inline-flex items-center rounded-full bg-[#fff7ed] px-2 py-0.5 font-semibold text-[#c2410c] ring-1 ring-[#fed7aa]">
+                                <AlertCircle aria-hidden="true" className="mr-1 h-3 w-3" strokeWidth={2} />
+                                Needs Review
+                              </span>
+                            ) : null}
+                          </span>
+                          {item.classificationReason ? (
+                            <span className="mt-1 block text-xs text-[#94a3b8]">{item.classificationReason}</span>
+                          ) : null}
                         </span>
                         <span className="text-right text-[#64748b]">
                           {(item.takeoffQuantity ?? item.quantity ?? 0).toLocaleString()}
@@ -255,7 +288,6 @@ export function ProjectSystemsPanel({
                                 {option.systemName}
                               </option>
                             ))}
-                            <option value="Needs Review">Needs Review</option>
                           </select>
                           <input
                             className="h-9 rounded-lg border border-[#e5e7eb] bg-white px-2 text-xs outline-none transition placeholder:text-[#94a3b8] focus:border-[#16a34a] focus:ring-4 focus:ring-[#dcfce7]"
@@ -271,6 +303,16 @@ export function ProjectSystemsPanel({
                             <Save aria-hidden="true" className="mr-1.5 h-3.5 w-3.5" strokeWidth={2} />
                             {savingItemId === item.id ? "Saving..." : "Save"}
                           </button>
+                          <label className="flex items-center gap-2 text-xs font-semibold text-[#64748b] sm:col-span-3">
+                            <input
+                              className="h-4 w-4 rounded border-[#cbd5e1] text-[#16a34a] focus:ring-[#16a34a]"
+                              defaultChecked={item.needsReview}
+                              name="needs_review"
+                              type="checkbox"
+                              value="true"
+                            />
+                            Keep marked as Needs Review
+                          </label>
                         </span>
                       </form>
                     )),
