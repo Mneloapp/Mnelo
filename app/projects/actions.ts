@@ -16,7 +16,7 @@ import type { DocumentType } from "@/lib/data";
 const documentTypes = ["BOQ Excel", "Specification PDF", "Drawing PDF", "Other"] satisfies DocumentType[];
 const allowedExtensions = [".xlsx", ".xls", ".pdf"];
 const AI_CLASSIFICATION_BATCH_SIZE = 15;
-const MAX_AI_CLASSIFICATION_ITEMS_PER_RUN = 45;
+const MAX_AI_CLASSIFICATION_ITEMS_PER_RUN = 15;
 const descriptionHeaders = [
   "description",
   "item",
@@ -1398,6 +1398,12 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
     };
   });
   const classifications = classificationSources.map((classificationSource) => classificationSource.classification);
+  const learnedRowIds = new Set(
+    rows
+      .map((row, index) => (classificationSources[index].source === "learned" ? row.id : null))
+      .filter((rowId): rowId is string => Boolean(rowId)),
+  );
+  const touchedAiRowIds = new Set<string>();
   let aiClassifiedCount = 0;
   let aiError: string | null = null;
 
@@ -1438,6 +1444,7 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
       }
 
       for (const candidate of batch) {
+        touchedAiRowIds.add(candidate.row.id);
         const aiClassification = result.classifications.get(candidate.row.id);
 
         if (!aiClassification) {
@@ -1463,7 +1470,11 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
     console.log("BOQ AI classification skipped: OPENAI_API_KEY is not configured.");
   }
   const { categoryIdsByKey, systemIdsByName } = await getSystemReferenceMaps({
-    classifications,
+    classifications: rows
+      .map((row, index) =>
+        touchedAiRowIds.has(row.id) || learnedRowIds.has(row.id) ? classifications[index] : null,
+      )
+      .filter((classification): classification is SystemClassification => Boolean(classification)),
     projectId,
     supabase,
     userId: user.id,
@@ -1471,8 +1482,14 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
   let updatedCount = 0;
   let firstError: string | null = null;
 
-  const updateJobs = rows.map((row, index) => {
-    const classification = classifications[index];
+  const rowsToUpdate =
+    touchedAiRowIds.size > 0 || learnedRowIds.size > 0
+      ? rows.filter((row) => touchedAiRowIds.has(row.id) || learnedRowIds.has(row.id))
+      : rows;
+
+  const updateJobs = rowsToUpdate.map((row) => {
+    const rowIndex = rows.findIndex((candidate) => candidate.id === row.id);
+    const classification = classifications[rowIndex];
     const systemId = systemIdsByName.get(classification.systemName);
     const categoryId = systemId ? categoryIdsByKey.get(`${systemId}:${classification.categoryName}`) : undefined;
 
@@ -1523,9 +1540,9 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
   return {
     ok: true,
     message:
-      updatedCount === rows.length
-        ? `Classified ${updatedCount} BOQ items into systems.${aiClassifiedCount > 0 ? ` AI classified ${aiClassifiedCount} items.` : ""}${aiError ? ` ${aiError}` : ""}`
-        : `Classified ${updatedCount} of ${rows.length} BOQ items. ${firstError || ""} ${aiError || ""}`.trim(),
+      updatedCount === rowsToUpdate.length
+        ? `Classified ${updatedCount} BOQ items this run.${aiClassifiedCount > 0 ? ` AI classified ${aiClassifiedCount} items.` : ""}${aiError ? ` ${aiError}` : ""}`
+        : `Classified ${updatedCount} of ${rowsToUpdate.length} queued BOQ items. ${firstError || ""} ${aiError || ""}`.trim(),
   } satisfies ProjectDocumentActionResult;
 }
 
