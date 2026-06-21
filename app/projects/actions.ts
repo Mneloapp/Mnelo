@@ -776,6 +776,14 @@ async function deleteParsedBoqRowsForFile({
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
   userId: string;
 }) {
+  const { error: projectDeleteError } = await supabase.from("boq_items").delete().eq("project_id", projectId).eq("user_id", userId);
+
+  if (!projectDeleteError) {
+    return;
+  }
+
+  console.info(`[boq-parse] project-level BOQ cleanup failed, falling back to file cleanup: ${projectDeleteError.message}`);
+
   const deleteAttempts = [
     () =>
       supabase
