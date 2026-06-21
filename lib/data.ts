@@ -444,6 +444,96 @@ function filterBoqRowsForExistingFiles(rows: BoqItemRow[], validFileIds: Set<str
   });
 }
 
+function isEmptyNumericValue(value?: number | null) {
+  return value === null || value === undefined || Number(value || 0) === 0;
+}
+
+function isNumericOnlyDescription(description: string) {
+  return /^[\d\s.,#№/-]+$/.test(description.trim());
+}
+
+function looksLikeLegacyIgnoredRow(row: BoqItemRow) {
+  const description = row.description?.trim() || "";
+
+  return !description || isNumericOnlyDescription(description);
+}
+
+function looksLikeLegacySectionHeader(row: BoqItemRow) {
+  if (row.row_type && row.row_type !== "item") {
+    return false;
+  }
+
+  const description = row.description?.trim() || "";
+
+  if (!description || isNumericOnlyDescription(description)) {
+    return false;
+  }
+
+  return (
+    isEmptyNumericValue(row.quantity) &&
+    isEmptyNumericValue(row.rate) &&
+    isEmptyNumericValue(row.amount) &&
+    !row.unit?.trim() &&
+    description.length <= 180
+  );
+}
+
+function applyReadTimeExcelContext(rows: BoqItemRow[]) {
+  const currentSectionBySheet = new Map<string, string>();
+
+  return rows.map((row) => {
+    const sheetKey = `${row.source_file_id || row.project_file_id || "file"}:${row.source_sheet_name || row.sheet_name || "sheet"}`;
+    const existingSection = row.section_header || row.inherited_category || row.inherited_subcategory;
+
+    if (row.row_type === "header" && row.description) {
+      currentSectionBySheet.set(sheetKey, row.description);
+      return {
+        ...row,
+        inherited_category: row.inherited_category || row.description,
+        inherited_subcategory: row.inherited_subcategory || row.description,
+        section_header: row.section_header || row.description,
+      };
+    }
+
+    if (looksLikeLegacyIgnoredRow(row)) {
+      return {
+        ...row,
+        cleanup_reason: row.cleanup_reason || "Read-time cleanup detected a non-item helper row.",
+        row_type: row.row_type || "ignored",
+      };
+    }
+
+    if (looksLikeLegacySectionHeader(row)) {
+      currentSectionBySheet.set(sheetKey, row.description);
+      return {
+        ...row,
+        cleanup_reason: row.cleanup_reason || "Read-time cleanup detected an Excel section header.",
+        inherited_category: row.inherited_category || row.description,
+        inherited_subcategory: row.inherited_subcategory || row.description,
+        row_type: "header",
+        section_header: row.section_header || row.description,
+      };
+    }
+
+    if (existingSection) {
+      currentSectionBySheet.set(sheetKey, existingSection);
+    }
+
+    const inheritedSection = existingSection || currentSectionBySheet.get(sheetKey) || null;
+
+    if (!inheritedSection) {
+      return row;
+    }
+
+    return {
+      ...row,
+      inherited_category: row.inherited_category || inheritedSection,
+      inherited_subcategory: row.inherited_subcategory || inheritedSection,
+      section_header: row.section_header || inheritedSection,
+    };
+  });
+}
+
 function firstMeaningfulValue(...values: Array<null | string | undefined>) {
   return values.find((value) => {
     const normalized = value?.trim();
@@ -765,7 +855,9 @@ export async function getBoqItemsForCurrentUser(projectId: string) {
   }
 
   const validFileIds = new Set(((filesResult.data || []) as Array<{ id: string }>).map((file) => file.id));
-  const rows = filterBoqRowsForExistingFiles((boqResult.data || []) as BoqItemRow[], validFileIds);
+  const rows = applyReadTimeExcelContext(
+    filterBoqRowsForExistingFiles((boqResult.data || []) as BoqItemRow[], validFileIds),
+  );
   const items = rows.map(mapBoqItem);
 
   return {
@@ -810,7 +902,9 @@ export async function getProjectSystemsForCurrentUser(projectId: string) {
   }
 
   const validFileIds = new Set(((filesResult.data || []) as Array<{ id: string }>).map((file) => file.id));
-  const rows = filterBoqRowsForExistingFiles((boqResult.data || []) as BoqItemRow[], validFileIds);
+  const rows = applyReadTimeExcelContext(
+    filterBoqRowsForExistingFiles((boqResult.data || []) as BoqItemRow[], validFileIds),
+  );
 
   const systems = new Map<
     string,
