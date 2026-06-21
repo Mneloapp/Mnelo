@@ -54,6 +54,7 @@ const rateHeaders = [
   "fiyat",
 ];
 const amountHeaders = ["amount", "total", "sum", "ჯამი", "თანხა", "სულ", "сумма", "итого", "toplam", "tutar"];
+const numberHeaders = ["no", "no.", "number", "#", "№", "item no", "n", "N"];
 type ParsedBoqRow = {
   description: string;
   quantity: number | null;
@@ -291,6 +292,53 @@ function normalizeParsedBoqRows(rows: ParsedBoqRow[]) {
   });
 }
 
+function logBoqParserDebugSummary(projectId: string, rows: ParsedBoqRow[]) {
+  const rowsBySheet = rows.reduce((summary, row) => {
+    const sheetName = row.source_sheet_name || row.sheet_name || "Unknown";
+    const current = summary.get(sheetName) || { headerRows: 0, ignoredRows: 0, inheritedRows: 0, itemRows: 0, needsReviewRows: 0, rows: 0 };
+    const prediction = row.row_type === "item" ? predictClassification(row) : null;
+
+    current.rows += 1;
+    current.headerRows += row.row_type === "header" ? 1 : 0;
+    current.ignoredRows += row.row_type && row.row_type !== "item" && row.row_type !== "header" ? 1 : 0;
+    current.itemRows += row.row_type === "item" ? 1 : 0;
+    current.inheritedRows += row.row_type === "item" && Boolean(row.section_header) ? 1 : 0;
+    current.needsReviewRows += prediction?.classification_source === "needs_review" ? 1 : 0;
+    summary.set(sheetName, current);
+
+    return summary;
+  }, new Map<string, { headerRows: number; ignoredRows: number; inheritedRows: number; itemRows: number; needsReviewRows: number; rows: number }>());
+  const itemRows = rows.filter((row) => row.row_type === "item");
+  const rowsSentToAi = itemRows.filter((row) => {
+    const prediction = predictClassification(row);
+
+    return prediction.classification_source === "needs_review" || prediction.confidence_score < 0.7;
+  }).length;
+  const totals = Array.from(rowsBySheet.values()).reduce(
+    (summary, sheet) => ({
+      headerRows: summary.headerRows + sheet.headerRows,
+      ignoredRows: summary.ignoredRows + sheet.ignoredRows,
+      inheritedRows: summary.inheritedRows + sheet.inheritedRows,
+      itemRows: summary.itemRows + sheet.itemRows,
+      needsReviewRows: summary.needsReviewRows + sheet.needsReviewRows,
+      rows: summary.rows + sheet.rows,
+    }),
+    { headerRows: 0, ignoredRows: 0, inheritedRows: 0, itemRows: 0, needsReviewRows: 0, rows: 0 },
+  );
+
+  console.log(
+    `BOQ parser summary ${JSON.stringify({
+      projectId,
+      sheets: Array.from(rowsBySheet.entries()).map(([sheetName, summary]) => ({ sheetName, ...summary })),
+      sheetsParsed: rowsBySheet.size,
+      totals: {
+        ...totals,
+        rowsSentToAi,
+      },
+    })}`,
+  );
+}
+
 function descriptionTokens(description: string) {
   const stopWords = new Set([
     "and",
@@ -409,6 +457,7 @@ async function getLearnedClassifications(
 function selectHeaderMatch(rows: unknown[][], mapping?: ColumnMapping | null) {
   return rows.slice(0, 50).map((row, index) => {
     const rowValues = Array.isArray(row) ? row : [];
+    const rowIsNumericHelper = rowValues.filter((value) => cellText(value)).every((value) => parseNumber(value) !== null);
     const descriptionColumn =
       mapping?.description ? findMappedColumn(rowValues, mapping.description) : findColumn(rowValues, descriptionHeaders);
     const quantityColumn =
@@ -416,7 +465,10 @@ function selectHeaderMatch(rows: unknown[][], mapping?: ColumnMapping | null) {
     const unitColumn = mapping?.unit ? findMappedColumn(rowValues, mapping.unit) : findColumn(rowValues, unitHeaders);
     const rateColumn = mapping?.rate ? findMappedColumn(rowValues, mapping.rate) : findColumn(rowValues, rateHeaders);
     const amountColumn = mapping?.amount ? findMappedColumn(rowValues, mapping.amount) : findColumn(rowValues, amountHeaders);
+    const numberColumn = findColumn(rowValues, numberHeaders);
     const score =
+      (rowIsNumericHelper ? -10 : 0) +
+      (numberColumn >= 0 ? 1 : 0) +
       (descriptionColumn >= 0 ? 4 : 0) +
       (quantityColumn >= 0 ? 2 : 0) +
       (unitColumn >= 0 ? 1 : 0) +
@@ -430,6 +482,7 @@ function selectHeaderMatch(rows: unknown[][], mapping?: ColumnMapping | null) {
       unitColumn,
       rateColumn,
       amountColumn,
+      numberColumn,
       score,
     };
   }).sort((a, b) => b.score - a.score)[0];
@@ -446,7 +499,7 @@ async function readWorkbook(source: Blob) {
 
 function getSheetRows(sheet: XLSX.WorkSheet) {
   return XLSX.utils.sheet_to_json<unknown[]>(sheet, {
-    blankrows: false,
+    blankrows: true,
     defval: "",
     header: 1,
     raw: true,
@@ -552,13 +605,11 @@ function buildParsedBoqRow({
   sheetName: string;
   unit: string | null;
 }) {
-  const inheritedClassification = inferClassificationFromExcelContext(sheetName, currentSectionHeader);
-
   return {
     amount,
     description,
-    inherited_category: inheritedClassification?.categoryName || null,
-    inherited_subcategory: inheritedClassification?.subcategoryName || currentSectionHeader || null,
+    inherited_category: currentSectionHeader,
+    inherited_subcategory: currentSectionHeader,
     quantity,
     rate,
     row_number: rowNumber,
@@ -699,8 +750,8 @@ async function parseBoqWorkbook(source: Blob, mapping?: ColumnMapping | null) {
             amount: null,
             cleanup_reason: "Section header used as inherited classification context.",
             description: fullRowText,
-            inherited_category: inferClassificationFromExcelContext(sheetName, currentSectionHeader)?.categoryName || null,
-            inherited_subcategory: inferClassificationFromExcelContext(sheetName, currentSectionHeader)?.subcategoryName || null,
+            inherited_category: currentSectionHeader,
+            inherited_subcategory: currentSectionHeader,
             quantity: null,
             rate: null,
             row_number: rowIndex + 1,
@@ -761,14 +812,13 @@ async function parseBoqWorkbook(source: Blob, mapping?: ColumnMapping | null) {
         })
       ) {
         currentSectionHeader = fullRowText;
-        const inheritedClassification = inferClassificationFromExcelContext(sheetName, currentSectionHeader);
 
         parsedRows.push({
           amount: null,
           cleanup_reason: "Section header used as inherited classification context.",
           description: fullRowText,
-          inherited_category: inheritedClassification?.categoryName || null,
-          inherited_subcategory: inheritedClassification?.subcategoryName || null,
+          inherited_category: currentSectionHeader,
+          inherited_subcategory: currentSectionHeader,
           quantity: null,
           rate: null,
           row_number: rowIndex + 1,
@@ -863,6 +913,7 @@ async function saveParsedBoqRows({
   userId: string;
 }) {
   const normalizedRows = normalizeParsedBoqRows(rows);
+  logBoqParserDebugSummary(projectId, normalizedRows);
   const buildBoqRows = ({ fileColumns, optionalColumns }: BoqInsertMode) =>
     normalizedRows.map((row) => {
       const rowType = row.row_type || "item";
@@ -896,6 +947,7 @@ async function saveParsedBoqRows({
         payload.subcategory = prediction.predicted_subcategory;
         payload.classification_subcategory = prediction.predicted_classification_subcategory;
         payload.confidence_score = prediction.confidence_score;
+        payload.classification_confidence = prediction.confidence_score;
         payload.classification_reason = prediction.classification_reason;
         payload.classification_source = prediction.classification_source;
         payload.classification_status = prediction.needs_review ? "needs_review" : "classified";
@@ -948,6 +1000,7 @@ async function saveParsedBoqRows({
       boqError.message.includes("category") ||
       boqError.message.includes("subcategory") ||
       boqError.message.includes("classification_subcategory") ||
+      boqError.message.includes("classification_confidence") ||
       boqError.message.includes("classification_reason") ||
       boqError.message.includes("classification_source") ||
       boqError.message.includes("classification_status") ||
@@ -1717,6 +1770,8 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
   const touchedAiRowIds = new Set<string>();
   let aiClassifiedCount = 0;
   let aiError: string | null = null;
+  const inheritedHeaderCount = classificationSources.filter((entry) => entry.source === "inherited_header").length;
+  const needsReviewCount = classificationSources.filter((entry) => entry.source === "needs_review").length;
 
   if (isAiClassificationConfigured()) {
     const allAiCandidates = rows
@@ -1731,9 +1786,14 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
     const skippedAiCandidateCount = allAiCandidates.length - aiCandidates.length;
 
     console.log(
-      `BOQ AI classification fallback: ${aiCandidates.length} item(s), ${Math.ceil(
-        aiCandidates.length / AI_CLASSIFICATION_BATCH_SIZE,
-      )} batch(es), ${skippedAiCandidateCount} deferred.`,
+      `BOQ classification summary ${JSON.stringify({
+        aiCandidateRows: aiCandidates.length,
+        aiDeferredRows: skippedAiCandidateCount,
+        aiBatches: Math.ceil(aiCandidates.length / AI_CLASSIFICATION_BATCH_SIZE),
+        inheritedHeaderRows: inheritedHeaderCount,
+        itemRows: rows.length,
+        needsReviewRows: needsReviewCount,
+      })}`,
     );
 
     for (let index = 0; index < aiCandidates.length; index += AI_CLASSIFICATION_BATCH_SIZE) {
@@ -1779,7 +1839,16 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
     }
   } else {
     aiError = "AI unavailable: OPENAI_API_KEY is not configured. Local fallback used.";
-    console.log("BOQ AI classification skipped: OPENAI_API_KEY is not configured.");
+    console.log(
+      `BOQ classification summary ${JSON.stringify({
+        aiCandidateRows: 0,
+        aiDeferredRows: 0,
+        aiSkippedReason: "OPENAI_API_KEY is not configured",
+        inheritedHeaderRows: inheritedHeaderCount,
+        itemRows: rows.length,
+        needsReviewRows: needsReviewCount,
+      })}`,
+    );
   }
   const { categoryIdsByKey, systemIdsByName } = await getSystemReferenceMaps({
     classifications: rows
