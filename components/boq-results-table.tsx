@@ -2,22 +2,11 @@
 
 import { useMemo, useState } from "react";
 import { correctBoqClassification } from "@/app/projects/actions";
+import { getSystemRuleOptions } from "@/lib/classification";
 import { BoqCleanupSummary, BoqItem, LearningRecord } from "@/lib/data";
 import { Badge } from "@/components/ui";
 
-const categoryOptions = [
-  "HVAC",
-  "Electrical",
-  "Furniture",
-  "Medical Equipment",
-  "Industrial Equipment",
-  "Software",
-  "Construction Materials",
-  "Renewable Energy",
-  "Logistics",
-  "Office Supplies",
-  "General",
-];
+const categoryOptions = getSystemRuleOptions().map((option) => option.systemName);
 
 function learningKey(sourceFileId: string | null, description: string) {
   return `${sourceFileId || "unknown"}:${description.toLowerCase()}`;
@@ -88,6 +77,7 @@ export function BoqResultsTable({
                 <th className="px-5 py-3 font-semibold">Unit</th>
                 <th className="px-5 py-3 text-right font-semibold">Rate</th>
                 <th className="px-5 py-3 text-right font-semibold">Amount</th>
+                <th className="px-5 py-3 font-semibold">Subcategory</th>
                 <th className="px-5 py-3 font-semibold">Row type</th>
                 {showClassification ? (
                   <>
@@ -125,6 +115,7 @@ export function BoqResultsTable({
                     <td className="whitespace-nowrap px-5 py-4 text-right text-ink/60">
                       {item.amount === null ? "—" : item.amount.toLocaleString()}
                     </td>
+                    <td className="whitespace-nowrap px-5 py-4 text-ink/60">{item.classificationSubcategory || "—"}</td>
                     <td className="whitespace-nowrap px-5 py-4">
                       <Badge tone={item.rowType === "item" ? "green" : "neutral"}>{item.rowType}</Badge>
                       {item.rowType !== "item" && item.cleanupReason ? (

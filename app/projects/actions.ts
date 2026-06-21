@@ -7,8 +7,10 @@ import { classifyBoqItemsWithAi, isAiClassificationConfigured } from "@/lib/ai-c
 import { cleanupBoqRow, type BoqRowType } from "@/lib/boq-cleanup";
 import {
   classifyBoqSystem,
+  getDefaultSubcategory,
   getSystemRuleOptions,
   NEEDS_REVIEW_CATEGORY,
+  NEEDS_REVIEW_SUBCATEGORY,
   NEEDS_REVIEW_SYSTEM,
   normalizeTakeoffUnit,
   type SystemClassification,
@@ -85,6 +87,7 @@ type ClassificationPrediction = {
   confidence_score: number;
   classification_reason: string;
   classification_source: ClassificationSource;
+  predicted_classification_subcategory: string | null;
   needs_review: boolean;
 };
 
@@ -104,6 +107,7 @@ type BoqClassificationRow = {
   classification_confidence?: number | null;
   classification_reason?: string | null;
   classification_source?: ClassificationSource | null;
+  classification_subcategory?: string | null;
   needs_review?: boolean | null;
   project_file_id?: string | null;
   row_type?: BoqRowType | null;
@@ -114,6 +118,7 @@ type LearnedClassification = {
   item_description: string | null;
   final_category: string | null;
   final_subcategory: string | null;
+  final_classification_subcategory?: string | null;
   user_corrected_category: string | null;
   user_corrected_subcategory: string | null;
 };
@@ -245,6 +250,7 @@ function predictClassification(description: string): ClassificationPrediction {
     needs_review: needsReview,
     predicted_category: classification.systemName,
     predicted_subcategory: classification.categoryName,
+    predicted_classification_subcategory: classification.subcategoryName || null,
     predicted_supplier_type: classification.supplierType,
     confidence_score: classification.confidenceScore,
   };
@@ -652,6 +658,7 @@ async function saveParsedBoqRows({
               classification_source: "needs_review",
               confidence_score: 0,
               needs_review: false,
+              predicted_classification_subcategory: null,
               predicted_category: "Ignored",
               predicted_subcategory: rowType,
               predicted_supplier_type: "Not applicable",
@@ -671,6 +678,7 @@ async function saveParsedBoqRows({
         payload.amount = row.amount;
         payload.category = prediction.predicted_category;
         payload.subcategory = prediction.predicted_subcategory;
+        payload.classification_subcategory = prediction.predicted_classification_subcategory;
         payload.confidence_score = prediction.confidence_score;
         payload.classification_reason = prediction.classification_reason;
         payload.classification_source = prediction.classification_source;
@@ -718,6 +726,7 @@ async function saveParsedBoqRows({
       boqError.message.includes("amount") ||
       boqError.message.includes("category") ||
       boqError.message.includes("subcategory") ||
+      boqError.message.includes("classification_subcategory") ||
       boqError.message.includes("classification_reason") ||
       boqError.message.includes("classification_source") ||
       boqError.message.includes("classification_status") ||
@@ -1252,6 +1261,7 @@ async function updateBoqItemClassification({
     (classification.systemName === NEEDS_REVIEW_SYSTEM || classificationSource === "needs_review");
   const basePayload = {
     category: classification.systemName,
+    classification_subcategory: classification.subcategoryName || null,
     confidence_score: classification.confidenceScore,
     subcategory: classification.categoryName,
   };
@@ -1303,6 +1313,7 @@ async function updateBoqItemClassification({
       error.message.includes("system_id") ||
       error.message.includes("takeoff_quantity") ||
       error.message.includes("takeoff_unit") ||
+      error.message.includes("classification_subcategory") ||
       error.message.includes("classification_source") ||
       error.message.includes("classification_reason") ||
       error.message.includes("needs_review") ||
@@ -1353,7 +1364,7 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
   const boqResult = await supabase
     .from("boq_items")
     .select(
-      "id, description, quantity, unit, amount, category, subcategory, classification_confidence, classification_reason, classification_source, needs_review, row_type",
+      "id, description, quantity, unit, amount, category, subcategory, classification_subcategory, classification_confidence, classification_reason, classification_source, needs_review, row_type",
     )
     .eq("project_id", projectId)
     .eq("user_id", user.id)
@@ -1368,6 +1379,7 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
       error.message.includes("amount") ||
       error.message.includes("category") ||
       error.message.includes("subcategory") ||
+      error.message.includes("classification_subcategory") ||
       error.message.includes("classification_confidence") ||
       error.message.includes("classification_reason") ||
       error.message.includes("classification_source") ||
@@ -1433,18 +1445,18 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
           confidenceScore: Number(row.classification_confidence || 0.8),
           reason:
             row.classification_reason ||
-            (persistedSource === "learned"
-              ? "User confirmed this classification."
-              : "Previously classified by AI."),
+            (persistedSource === "learned" ? "User confirmed this classification." : "Previously classified by AI."),
           source: persistedSource,
-          supplierType: classifyBoqSystem(row.description, row.category, row.subcategory).supplierType,
+          subcategoryName: row.classification_subcategory || null,
+          supplierType: classifyBoqSystem(row.description, row.category, row.subcategory, row.classification_subcategory).supplierType,
           systemName: row.category,
         } satisfies SystemClassification,
         source: persistedSource,
       };
     }
 
-    const localClassification = learnedClassification || classifyBoqSystem(row.description, row.category, row.subcategory);
+    const localClassification =
+      learnedClassification || classifyBoqSystem(row.description, row.category, row.subcategory, row.classification_subcategory);
     const source = (localClassification.systemName === NEEDS_REVIEW_SYSTEM ? "needs_review" : "rules") satisfies ClassificationSource;
 
     return {
@@ -1492,6 +1504,7 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
       const result = await classifyBoqItemsWithAi(
         batch.map((candidate) => ({
           currentCategory: candidate.row.subcategory,
+          currentSubcategory: candidate.row.classification_subcategory,
           currentSystem: candidate.row.category,
           description: candidate.row.description,
           id: candidate.row.id,
@@ -1614,6 +1627,7 @@ export async function correctBoqItemSystemClassification(formData: FormData) {
     const itemId = readString(formData, "item_id");
     const systemName = readString(formData, "system_name");
     const categoryName = readString(formData, "category_name");
+    const subcategoryName = readString(formData, "subcategory_name") || getDefaultSubcategory(systemName, categoryName);
     const needsReview = readString(formData, "needs_review") === "true";
 
     if (!projectId || !itemId || !systemName || !categoryName) {
@@ -1628,7 +1642,7 @@ export async function correctBoqItemSystemClassification(formData: FormData) {
 
     const { data: row, error: rowError } = await supabase
       .from("boq_items")
-      .select("id, description, quantity, unit, amount, category, subcategory")
+      .select("id, description, quantity, unit, amount, category, subcategory, classification_subcategory")
       .eq("id", itemId)
       .eq("project_id", projectId)
       .eq("user_id", user.id)
@@ -1648,6 +1662,7 @@ export async function correctBoqItemSystemClassification(formData: FormData) {
       confidenceScore: 1,
       reason: "User confirmed this classification.",
       source: "learned" as const,
+      subcategoryName,
       supplierType: "User corrected supplier",
       systemName,
     };
@@ -1693,6 +1708,7 @@ export async function correctBoqItemSystemClassification(formData: FormData) {
       },
       output: {
         category: categoryName,
+        subcategory: subcategoryName,
         system: systemName,
       },
       feedback: "User system classification correction",
@@ -1717,6 +1733,7 @@ type BulkManualClassificationChange = {
   categoryName: string;
   itemId: string;
   needsReview: boolean;
+  subcategoryName: string | null;
   systemName: string;
 };
 
@@ -1732,6 +1749,7 @@ function parseBulkManualClassificationChanges(formData: FormData) {
           categoryName: String(change.categoryName || "").trim(),
           itemId: String(change.itemId || "").trim(),
           needsReview: Boolean(change.needsReview),
+          subcategoryName: change.subcategoryName ? String(change.subcategoryName).trim() : null,
           systemName: String(change.systemName || "").trim(),
         }))
         .filter((change) => change.itemId && change.systemName && change.categoryName);
@@ -1742,6 +1760,7 @@ function parseBulkManualClassificationChanges(formData: FormData) {
 
   const systemName = readString(formData, "system_name");
   const categoryName = readString(formData, "category_name") || defaultCategoryForSystemName(systemName);
+  const subcategoryName = readString(formData, "subcategory_name") || getDefaultSubcategory(systemName, categoryName);
   const needsReviewMode = readString(formData, "needs_review_mode");
   const needsReview = needsReviewMode === "mark";
   const itemIds = formData
@@ -1754,6 +1773,7 @@ function parseBulkManualClassificationChanges(formData: FormData) {
       categoryName,
       itemId,
       needsReview,
+      subcategoryName,
       systemName,
     }))
     .filter((change) => change.itemId && change.systemName && change.categoryName);
@@ -1782,7 +1802,7 @@ export async function bulkCorrectBoqItemClassifications(formData: FormData) {
     const changesById = new Map(changes.map((change) => [change.itemId, change]));
     const { data: rows, error: rowsError } = await supabase
       .from("boq_items")
-      .select("id, description, quantity, unit, amount, category, subcategory, source_file_id, project_file_id, row_type")
+      .select("id, description, quantity, unit, amount, category, subcategory, classification_subcategory, source_file_id, project_file_id, row_type")
       .eq("project_id", projectId)
       .eq("user_id", user.id)
       .eq("row_type", "item")
@@ -1806,6 +1826,7 @@ export async function bulkCorrectBoqItemClassifications(formData: FormData) {
         confidenceScore: 1,
         reason: "Manual bulk correction",
         source: "learned" as const,
+        subcategoryName: change?.subcategoryName || null,
         supplierType: "User corrected supplier",
         systemName: change?.systemName || NEEDS_REVIEW_SYSTEM,
       } satisfies SystemClassification;
@@ -1877,6 +1898,7 @@ export async function bulkCorrectBoqItemClassifications(formData: FormData) {
         output: {
           category: change?.categoryName,
           needs_review: change?.needsReview,
+          subcategory: change?.subcategoryName,
           system: change?.systemName,
         },
         feedback: "Manual bulk correction",

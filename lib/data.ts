@@ -16,6 +16,7 @@ export type BoqItem = {
   amount: number | null;
   category: string;
   subcategory: string;
+  classificationSubcategory: string | null;
   confidenceScore: number;
   classificationReason: string | null;
   classificationSource: "ai" | "learned" | "needs_review" | "rules";
@@ -110,6 +111,7 @@ export type BoqItemRow = {
   confidence_score?: number | null;
   classification_reason?: string | null;
   classification_source?: string | null;
+  classification_subcategory?: string | null;
   cleanup_reason?: string | null;
   needs_review?: boolean | null;
   row_type?: string | null;
@@ -148,6 +150,15 @@ export type BoqCleanupSummary = {
 };
 
 export type ProjectSystemCategory = {
+  name: string;
+  itemCount: number;
+  subcategories: ProjectSystemSubcategory[];
+  totalAmount: number;
+  units: Array<{ unit: string; quantity: number }>;
+  items: SystemBoqItem[];
+};
+
+export type ProjectSystemSubcategory = {
   name: string;
   itemCount: number;
   totalAmount: number;
@@ -376,6 +387,7 @@ export function mapBoqItem(row: BoqItemRow): BoqItem {
     amount: row.amount === null || row.amount === undefined ? null : Number(row.amount || 0),
     category: row.category || "General",
     subcategory: row.subcategory || "Unclassified",
+    classificationSubcategory: row.classification_subcategory || null,
     confidenceScore: Number(row.confidence_score || 0),
     classificationReason: row.classification_reason || null,
     classificationSource,
@@ -725,7 +737,13 @@ export async function getProjectSystemsForCurrentUser(projectId: string) {
   const systems = new Map<
     string,
     {
-      categories: Map<string, ProjectSystemCategory & { unitTotals: Map<string, number> }>;
+      categories: Map<
+        string,
+        ProjectSystemCategory & {
+          subcategoryTotals: Map<string, ProjectSystemSubcategory & { unitTotals: Map<string, number> }>;
+          unitTotals: Map<string, number>;
+        }
+      >;
       confidenceTotal: number;
       itemCount: number;
       name: string;
@@ -740,10 +758,11 @@ export async function getProjectSystemsForCurrentUser(projectId: string) {
     }
 
     const item = mapBoqItem(row);
-    const classification = classifyBoqSystem(item.description, item.category, item.subcategory);
+    const classification = classifyBoqSystem(item.description, item.category, item.subcategory, item.classificationSubcategory);
     const systemName = item.category && item.category !== "General" ? item.category : classification.systemName;
     const categoryName =
       item.subcategory && item.subcategory !== "Unclassified" ? item.subcategory : classification.categoryName;
+    const subcategoryName = item.classificationSubcategory || classification.subcategoryName || "Unclassified";
     const takeoffQuantity =
       row.takeoff_quantity === null || row.takeoff_quantity === undefined
         ? item.quantity
@@ -755,7 +774,13 @@ export async function getProjectSystemsForCurrentUser(projectId: string) {
       takeoffUnit,
     } satisfies SystemBoqItem;
     const system = systems.get(systemName) || {
-      categories: new Map<string, ProjectSystemCategory & { unitTotals: Map<string, number> }>(),
+      categories: new Map<
+        string,
+        ProjectSystemCategory & {
+          subcategoryTotals: Map<string, ProjectSystemSubcategory & { unitTotals: Map<string, number> }>;
+          unitTotals: Map<string, number>;
+        }
+      >(),
       confidenceTotal: 0,
       itemCount: 0,
       name: systemName,
@@ -766,6 +791,16 @@ export async function getProjectSystemsForCurrentUser(projectId: string) {
       itemCount: 0,
       items: [],
       name: categoryName,
+      subcategories: [],
+      subcategoryTotals: new Map<string, ProjectSystemSubcategory & { unitTotals: Map<string, number> }>(),
+      totalAmount: 0,
+      unitTotals: new Map<string, number>(),
+      units: [],
+    };
+    const subcategory = category.subcategoryTotals.get(subcategoryName) || {
+      itemCount: 0,
+      items: [],
+      name: subcategoryName,
       totalAmount: 0,
       unitTotals: new Map<string, number>(),
       units: [],
@@ -777,12 +812,17 @@ export async function getProjectSystemsForCurrentUser(projectId: string) {
     category.itemCount += 1;
     category.totalAmount += item.amount || 0;
     category.items.push(systemItem);
+    subcategory.itemCount += 1;
+    subcategory.totalAmount += item.amount || 0;
+    subcategory.items.push(systemItem);
 
     if (takeoffQuantity !== null) {
       system.unitTotals.set(takeoffUnit, (system.unitTotals.get(takeoffUnit) || 0) + takeoffQuantity);
       category.unitTotals.set(takeoffUnit, (category.unitTotals.get(takeoffUnit) || 0) + takeoffQuantity);
+      subcategory.unitTotals.set(takeoffUnit, (subcategory.unitTotals.get(takeoffUnit) || 0) + takeoffQuantity);
     }
 
+    category.subcategoryTotals.set(subcategoryName, subcategory);
     system.categories.set(categoryName, category);
     systems.set(systemName, system);
   }
@@ -795,6 +835,15 @@ export async function getProjectSystemsForCurrentUser(projectId: string) {
             itemCount: category.itemCount,
             items: category.items,
             name: category.name,
+            subcategories: Array.from(category.subcategoryTotals.values())
+              .map((subcategory) => ({
+                itemCount: subcategory.itemCount,
+                items: subcategory.items,
+                name: subcategory.name,
+                totalAmount: subcategory.totalAmount,
+                units: sortedUnitTotals(subcategory.unitTotals),
+              }))
+              .sort((a, b) => b.itemCount - a.itemCount),
             totalAmount: category.totalAmount,
             units: sortedUnitTotals(category.unitTotals),
           }))

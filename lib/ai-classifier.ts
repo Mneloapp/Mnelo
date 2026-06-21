@@ -1,8 +1,12 @@
 import {
   classifyBoqSystem,
-  getSystemRuleOptions,
+  classificationTaxonomy,
   NEEDS_REVIEW_CATEGORY,
+  NEEDS_REVIEW_SUBCATEGORY,
   NEEDS_REVIEW_SYSTEM,
+  isValidCategory,
+  isValidSubcategory,
+  isValidSystem,
   type SystemClassification,
 } from "@/lib/classification";
 
@@ -15,14 +19,20 @@ export type AiBoqItemInput = {
   unit: string | null;
   currentSystem?: string | null;
   currentCategory?: string | null;
+  currentSubcategory?: string | null;
 };
 
 type AiClassificationOutput = {
+  category?: string | null;
   item_id: string;
+  reason: string;
+  subcategory?: string | null;
+  system?: string | null;
+  confidence?: number;
   system_name: string;
   category_name: string | null;
   confidence_score: number;
-  reason: string;
+  subcategory_name?: string | null;
 };
 
 type OpenAITextResponse = {
@@ -34,19 +44,6 @@ type OpenAITextResponse = {
     }>;
   }>;
 };
-
-const systemOptions = getSystemRuleOptions();
-const allowedSystems = new Set(systemOptions.map((option) => option.systemName));
-const allowedCategoriesBySystem = new Map<string, Set<string>>();
-
-for (const option of systemOptions) {
-  const categories = allowedCategoriesBySystem.get(option.systemName) || new Set<string>();
-
-  categories.add(option.categoryName);
-  allowedCategoriesBySystem.set(option.systemName, categories);
-}
-
-allowedCategoriesBySystem.set(NEEDS_REVIEW_SYSTEM, new Set([NEEDS_REVIEW_CATEGORY]));
 
 export function isAiClassificationConfigured() {
   return Boolean(process.env.OPENAI_API_KEY);
@@ -88,6 +85,7 @@ function needsReview(reason: string): SystemClassification {
     confidenceScore: 0.2,
     reason,
     source: "needs_review",
+    subcategoryName: NEEDS_REVIEW_SUBCATEGORY,
     supplierType: "Needs review",
     systemName: NEEDS_REVIEW_SYSTEM,
   };
@@ -98,30 +96,39 @@ function validateAiClassification(item: AiBoqItemInput, output?: Partial<AiClass
     return needsReview("AI did not return a classification for this item.");
   }
 
-  const systemName = String(output.system_name || "").trim();
-  const confidenceScore = validConfidence(output.confidence_score);
+  const systemName = String(output.system || output.system_name || "").trim();
+  const confidenceScore = validConfidence(output.confidence ?? output.confidence_score);
 
-  if (!allowedSystems.has(systemName) || confidenceScore === null) {
+  if (!isValidSystem(systemName) || confidenceScore === null) {
     return needsReview("AI returned an invalid system or confidence score.");
   }
 
-  const categoryName = output.category_name ? String(output.category_name).trim() : NEEDS_REVIEW_CATEGORY;
-  const allowedCategories = allowedCategoriesBySystem.get(systemName);
-
-  if (!allowedCategories?.has(categoryName)) {
-    return needsReview("AI returned a category outside the approved taxonomy.");
-  }
+  const categoryName = output.category || output.category_name ? String(output.category || output.category_name).trim() : null;
 
   if (systemName === NEEDS_REVIEW_SYSTEM) {
     return needsReview(shortReason(output.reason));
   }
+
+  if (!categoryName || !isValidCategory(systemName, categoryName)) {
+    return {
+      ...needsReview("AI returned a category outside the approved taxonomy."),
+      confidenceScore: Math.min(confidenceScore, 0.35),
+    };
+  }
+
+  const rawSubcategory = output.subcategory || output.subcategory_name;
+  const subcategoryName =
+    rawSubcategory && isValidSubcategory(systemName, categoryName, String(rawSubcategory).trim())
+      ? String(rawSubcategory).trim()
+      : null;
 
   return {
     categoryName,
     confidenceScore,
     reason: shortReason(output.reason),
     source: "ai",
-    supplierType: classifyBoqSystem(item.description, systemName, categoryName).supplierType,
+    subcategoryName,
+    supplierType: classifyBoqSystem(item.description, systemName, categoryName, subcategoryName).supplierType,
     systemName,
   } satisfies SystemClassification;
 }
@@ -162,12 +169,23 @@ Descriptions may be Georgian, English, Russian, Turkish, or mixed-language.
 Rules:
 - Classify only from the item description, unit, and minimal row context provided.
 - Do not invent quantities, rates, amounts, suppliers, or project facts.
-- Prefer a specific approved system and category when the product, material, equipment, or work scope is recognizable.
+- Prefer the closest approved system, category, and subcategory when the product, material, equipment, or work scope is recognizable.
 - Use "${NEEDS_REVIEW_SYSTEM}" only when the text is too vague or cannot be confidently mapped to the approved taxonomy.
+- Return null for category or subcategory when uncertain.
+- Do not invent a new taxonomy value.
 - Return JSON only.
 
 Approved taxonomy:
-${systemOptions.map((option) => `- ${option.systemName}: ${option.categoryName}`).join("\n")}`,
+${classificationTaxonomy
+  .map((system) =>
+    [
+      `- ${system.name}`,
+      ...system.categories.map(
+        (category) => `  - ${category.name}: ${category.subcategories.join(", ")}`,
+      ),
+    ].join("\n"),
+  )
+  .join("\n")}`,
                 type: "input_text",
               },
               {
@@ -197,15 +215,18 @@ ${systemOptions.map((option) => `- ${option.systemName}: ${option.categoryName}`
                   items: {
                     additionalProperties: false,
                     properties: {
-                      category_name: {
+                      category: {
                         anyOf: [{ type: "string" }, { type: "null" }],
                       },
-                      confidence_score: { maximum: 1, minimum: 0, type: "number" },
+                      confidence: { maximum: 1, minimum: 0, type: "number" },
                       item_id: { type: "string" },
                       reason: { maxLength: 160, type: "string" },
-                      system_name: { type: "string" },
+                      subcategory: {
+                        anyOf: [{ type: "string" }, { type: "null" }],
+                      },
+                      system: { type: "string" },
                     },
-                    required: ["item_id", "system_name", "category_name", "confidence_score", "reason"],
+                    required: ["item_id", "system", "category", "subcategory", "confidence", "reason"],
                     type: "object",
                   },
                   type: "array",

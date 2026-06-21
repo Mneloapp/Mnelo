@@ -4,7 +4,14 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AlertCircle, Download, Layers3, Save, Search, Sparkles, X } from "lucide-react";
 import { bulkCorrectBoqItemClassifications, classifyProjectBoqItems } from "@/app/projects/actions";
-import { getSystemRuleOptions, NEEDS_REVIEW_CATEGORY } from "@/lib/classification";
+import {
+  getCategoryOptions,
+  getDefaultCategory,
+  getDefaultSubcategory,
+  getSubcategoryOptions,
+  getSystemRuleOptions,
+  NEEDS_REVIEW_CATEGORY,
+} from "@/lib/classification";
 import type { ProjectSystemCategory, ProjectSystemSummary, SystemBoqItem } from "@/lib/data";
 import { EmptyState, ErrorMessage } from "@/components/ui";
 
@@ -14,6 +21,7 @@ const sourceOptions = ["all", "rules", "learned", "ai", "needs_review"] as const
 type DraftChange = {
   categoryName: string;
   needsReview: boolean;
+  subcategoryName: string | null;
   systemName: string;
 };
 
@@ -24,7 +32,7 @@ type FlatSystemRow = {
 };
 
 function defaultCategoryForSystem(systemName: string) {
-  return systemOptions.find((option) => option.systemName === systemName)?.categoryName || NEEDS_REVIEW_CATEGORY;
+  return getDefaultCategory(systemName) || NEEDS_REVIEW_CATEGORY;
 }
 
 function sourceLabel(source: string) {
@@ -47,6 +55,7 @@ function draftForItem(item: SystemBoqItem, systemName: string, categoryName: str
   return {
     categoryName,
     needsReview: item.needsReview,
+    subcategoryName: item.classificationSubcategory,
     systemName,
   };
 }
@@ -72,6 +81,9 @@ export function ProjectSystemsPanel({
   const [search, setSearch] = useState("");
   const [bulkSystem, setBulkSystem] = useState(systemOptions[0]?.systemName || "");
   const [bulkCategory, setBulkCategory] = useState(defaultCategoryForSystem(systemOptions[0]?.systemName || ""));
+  const [bulkSubcategory, setBulkSubcategory] = useState(
+    getDefaultSubcategory(systemOptions[0]?.systemName || "", defaultCategoryForSystem(systemOptions[0]?.systemName || "")),
+  );
 
   const allRows = useMemo(
     () =>
@@ -193,6 +205,7 @@ export function ProjectSystemsPanel({
         Quantity: item.takeoffQuantity ?? item.quantity ?? "",
         Rate: item.rate ?? "",
         Sheet: item.sheetName,
+        Subcategory: item.classificationSubcategory || "",
         System: system.name,
         Unit: item.takeoffUnit || item.unit || "",
       })),
@@ -208,6 +221,7 @@ export function ProjectSystemsPanel({
       categoryName: draft.categoryName,
       itemId,
       needsReview: draft.needsReview,
+      subcategoryName: draft.subcategoryName,
       systemName: draft.systemName,
     }));
 
@@ -252,7 +266,12 @@ export function ProjectSystemsPanel({
   function rowMoved(row: FlatSystemRow) {
     const saved = savedOverrides[row.item.id];
 
-    return Boolean(saved && (saved.systemName !== row.system.name || saved.categoryName !== row.category.name));
+    return Boolean(
+      saved &&
+        (saved.systemName !== row.system.name ||
+          saved.categoryName !== row.category.name ||
+          saved.subcategoryName !== row.item.classificationSubcategory),
+    );
   }
 
   return (
@@ -373,7 +392,7 @@ export function ProjectSystemsPanel({
 
       {selectedCount > 0 || dirtyCount > 0 ? (
         <div className="sticky top-3 z-20 mt-5 rounded-2xl border border-[#bbf7d0] bg-white/95 p-3 shadow-[0_18px_40px_rgba(15,23,42,0.12)] backdrop-blur">
-          <div className="grid gap-3 xl:grid-cols-[auto_12rem_12rem_auto_auto_auto_auto] xl:items-center">
+          <div className="grid gap-3 xl:grid-cols-[auto_11rem_12rem_12rem_auto_auto_auto_auto] xl:items-center">
             <p className="text-sm font-semibold text-[#0f172a]">
               {selectedCount} selected / {dirtyCount} unsaved
             </p>
@@ -382,9 +401,11 @@ export function ProjectSystemsPanel({
               onChange={(event) => {
                 const nextSystem = event.currentTarget.value;
                 const nextCategory = defaultCategoryForSystem(nextSystem);
+                const nextSubcategory = getDefaultSubcategory(nextSystem, nextCategory);
                 setBulkSystem(nextSystem);
                 setBulkCategory(nextCategory);
-                applyBulkPatch({ categoryName: nextCategory, systemName: nextSystem });
+                setBulkSubcategory(nextSubcategory);
+                applyBulkPatch({ categoryName: nextCategory, subcategoryName: nextSubcategory, systemName: nextSystem });
               }}
               value={bulkSystem}
             >
@@ -394,15 +415,37 @@ export function ProjectSystemsPanel({
                 </option>
               ))}
             </select>
-            <input
-              className="h-10 rounded-xl border border-[#e5e7eb] bg-white px-3 text-sm outline-none placeholder:text-[#94a3b8] focus:border-[#16a34a] focus:ring-4 focus:ring-[#dcfce7]"
+            <select
+              className="h-10 rounded-xl border border-[#e5e7eb] bg-white px-3 text-sm outline-none focus:border-[#16a34a] focus:ring-4 focus:ring-[#dcfce7]"
               onChange={(event) => {
-                setBulkCategory(event.currentTarget.value);
-                applyBulkPatch({ categoryName: event.currentTarget.value });
+                const nextCategory = event.currentTarget.value;
+                const nextSubcategory = getDefaultSubcategory(bulkSystem, nextCategory);
+                setBulkCategory(nextCategory);
+                setBulkSubcategory(nextSubcategory);
+                applyBulkPatch({ categoryName: nextCategory, subcategoryName: nextSubcategory });
               }}
-              placeholder="Set category"
               value={bulkCategory}
-            />
+            >
+              {getCategoryOptions(bulkSystem).map((category) => (
+                <option key={`${bulkSystem}-${category}`} value={category}>
+                  {category}
+                </option>
+              ))}
+            </select>
+            <select
+              className="h-10 rounded-xl border border-[#e5e7eb] bg-white px-3 text-sm outline-none focus:border-[#16a34a] focus:ring-4 focus:ring-[#dcfce7]"
+              onChange={(event) => {
+                setBulkSubcategory(event.currentTarget.value);
+                applyBulkPatch({ subcategoryName: event.currentTarget.value });
+              }}
+              value={bulkSubcategory}
+            >
+              {getSubcategoryOptions(bulkSystem, bulkCategory).map((subcategory) => (
+                <option key={`${bulkSystem}-${bulkCategory}-${subcategory}`} value={subcategory}>
+                  {subcategory}
+                </option>
+              ))}
+            </select>
             <button
               className="inline-flex h-10 items-center justify-center rounded-xl bg-[#fff7ed] px-3 text-xs font-semibold text-[#c2410c] ring-1 ring-[#fed7aa] transition hover:bg-[#ffedd5]"
               disabled={selectedCount === 0}
@@ -512,10 +555,20 @@ export function ProjectSystemsPanel({
 
                   const rowIds = rows.map((row) => row.item.id);
                   const checkedCount = rowIds.filter((id) => selectedIds.has(id)).length;
+                  const subcategoryCounts = Array.from(
+                    rows
+                      .reduce((counts, row) => {
+                        const name = row.item.classificationSubcategory || "Unclassified";
+
+                        counts.set(name, (counts.get(name) || 0) + 1);
+                        return counts;
+                      }, new Map<string, number>())
+                      .entries(),
+                  ).sort((a, b) => b[1] - a[1]);
 
                   return (
                     <div className="mt-4 overflow-x-auto rounded-xl border border-[#e5e7eb] bg-white" key={category.name}>
-                      <div className="grid min-w-[980px] grid-cols-[2.5rem_minmax(22rem,1fr)_7rem_5rem_7rem_minmax(24rem,30rem)] gap-3 bg-[#fbfdfb] px-4 py-3 text-xs font-semibold uppercase tracking-[0.12em] text-[#64748b]">
+                      <div className="grid min-w-[1120px] grid-cols-[2.5rem_minmax(22rem,1fr)_11rem_7rem_5rem_7rem_minmax(24rem,30rem)] gap-3 bg-[#fbfdfb] px-4 py-3 text-xs font-semibold uppercase tracking-[0.12em] text-[#64748b]">
                         <label className="flex items-center">
                           <input
                             checked={checkedCount === rowIds.length}
@@ -526,23 +579,37 @@ export function ProjectSystemsPanel({
                         </label>
                         <span>
                           {category.name} <span className="font-normal normal-case tracking-normal">({rows.length})</span>
+                          <span className="mt-2 flex flex-wrap gap-1 normal-case tracking-normal">
+                            {subcategoryCounts.slice(0, 5).map(([subcategory, count]) => (
+                              <span
+                                className="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-[#64748b] ring-1 ring-[#e5e7eb]"
+                                key={`${category.name}-${subcategory}`}
+                              >
+                                {subcategory}: {count}
+                              </span>
+                            ))}
+                          </span>
                         </span>
+                        <span>Subcategory</span>
                         <span className="text-right">Quantity</span>
                         <span>Unit</span>
                         <span className="text-right">Amount</span>
                         <span>Draft classification</span>
                       </div>
-                      <div className="min-w-[980px] divide-y divide-[#edf0ed]">
+                      <div className="min-w-[1120px] divide-y divide-[#edf0ed]">
                         {rows.map((row) => {
                           const item = row.item;
                           const draft = displayDraft(row);
                           const isDirty = Boolean(drafts[item.id]);
-                          const willMove = draft.systemName !== row.system.name || draft.categoryName !== row.category.name;
+                          const willMove =
+                            draft.systemName !== row.system.name ||
+                            draft.categoryName !== row.category.name ||
+                            draft.subcategoryName !== item.classificationSubcategory;
                           const moved = rowMoved(row);
 
                           return (
                             <div
-                              className="grid grid-cols-[2.5rem_minmax(22rem,1fr)_7rem_5rem_7rem_minmax(24rem,30rem)] gap-3 px-4 py-3 text-sm"
+                              className="grid grid-cols-[2.5rem_minmax(22rem,1fr)_11rem_7rem_5rem_7rem_minmax(24rem,30rem)] gap-3 px-4 py-3 text-sm"
                               key={item.id}
                             >
                               <label className="flex items-start pt-1">
@@ -557,6 +624,7 @@ export function ProjectSystemsPanel({
                                 <span className="line-clamp-2 font-medium text-[#0f172a]">{item.description}</span>
                                 <span className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[#64748b]">
                                   <span>{category.name}</span>
+                                  {item.classificationSubcategory ? <span>{item.classificationSubcategory}</span> : null}
                                   <span className="rounded-full bg-[#f8fafc] px-2 py-0.5 font-semibold text-[#64748b] ring-1 ring-[#e5e7eb]">
                                     {sourceLabel(item.classificationSource)}
                                   </span>
@@ -584,6 +652,7 @@ export function ProjectSystemsPanel({
                                   <span className="mt-1 block text-xs text-[#94a3b8]">{item.classificationReason}</span>
                                 ) : null}
                               </span>
+                              <span className="text-[#64748b]">{item.classificationSubcategory || "Unclassified"}</span>
                               <span className="text-right text-[#64748b]">
                                 {(item.takeoffQuantity ?? item.quantity ?? 0).toLocaleString()}
                               </span>
@@ -596,8 +665,10 @@ export function ProjectSystemsPanel({
                                   className="h-9 rounded-lg border border-[#e5e7eb] bg-white px-2 text-xs outline-none transition focus:border-[#16a34a] focus:ring-4 focus:ring-[#dcfce7]"
                                   onChange={(event) => {
                                     const nextSystem = event.currentTarget.value;
+                                    const nextCategory = defaultCategoryForSystem(nextSystem);
                                     updateDraft(item.id, {
-                                      categoryName: defaultCategoryForSystem(nextSystem),
+                                      categoryName: nextCategory,
+                                      subcategoryName: getDefaultSubcategory(nextSystem, nextCategory),
                                       systemName: nextSystem,
                                     });
                                   }}
@@ -609,12 +680,37 @@ export function ProjectSystemsPanel({
                                     </option>
                                   ))}
                                 </select>
-                                <input
-                                  className="h-9 rounded-lg border border-[#e5e7eb] bg-white px-2 text-xs outline-none transition placeholder:text-[#94a3b8] focus:border-[#16a34a] focus:ring-4 focus:ring-[#dcfce7]"
-                                  onChange={(event) => updateDraft(item.id, { categoryName: event.currentTarget.value })}
-                                  placeholder="Category"
+                                <select
+                                  className="h-9 rounded-lg border border-[#e5e7eb] bg-white px-2 text-xs outline-none transition focus:border-[#16a34a] focus:ring-4 focus:ring-[#dcfce7]"
+                                  onChange={(event) => {
+                                    const nextCategory = event.currentTarget.value;
+                                    updateDraft(item.id, {
+                                      categoryName: nextCategory,
+                                      subcategoryName: getDefaultSubcategory(draft.systemName, nextCategory),
+                                    });
+                                  }}
                                   value={draft.categoryName}
-                                />
+                                >
+                                  {getCategoryOptions(draft.systemName).map((categoryOption) => (
+                                    <option key={`${item.id}-${draft.systemName}-${categoryOption}`} value={categoryOption}>
+                                      {categoryOption}
+                                    </option>
+                                  ))}
+                                </select>
+                                <select
+                                  className="h-9 rounded-lg border border-[#e5e7eb] bg-white px-2 text-xs outline-none transition focus:border-[#16a34a] focus:ring-4 focus:ring-[#dcfce7] sm:col-span-2"
+                                  onChange={(event) => updateDraft(item.id, { subcategoryName: event.currentTarget.value })}
+                                  value={draft.subcategoryName || ""}
+                                >
+                                  {getSubcategoryOptions(draft.systemName, draft.categoryName).map((subcategoryOption) => (
+                                    <option
+                                      key={`${item.id}-${draft.systemName}-${draft.categoryName}-${subcategoryOption}`}
+                                      value={subcategoryOption}
+                                    >
+                                      {subcategoryOption}
+                                    </option>
+                                  ))}
+                                </select>
                                 <label className="flex items-center gap-2 text-xs font-semibold text-[#64748b] sm:col-span-2">
                                   <input
                                     checked={draft.needsReview}
