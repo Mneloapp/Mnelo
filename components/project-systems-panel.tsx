@@ -17,6 +17,7 @@ import { EmptyState, ErrorMessage } from "@/components/ui";
 
 const systemOptions = getSystemRuleOptions();
 const sourceOptions = ["all", "rules", "learned", "ai", "inherited_header", "needs_review"] as const;
+const sourceSummaryOrder = ["rules", "inherited_header", "ai", "learned", "needs_review"] as const;
 
 type DraftChange = {
   categoryName: string;
@@ -156,6 +157,46 @@ export function ProjectSystemsPanel({
   const selectedVisibleCount = Array.from(selectedIds).filter((id) => visibleIds.has(id)).length;
   const selectedCount = selectedIds.size;
   const dirtyCount = Object.keys(drafts).length;
+  const sourceSummary = useMemo(() => {
+    const counts = sourceSummaryOrder.reduce(
+      (summary, source) => ({
+        ...summary,
+        [source]: 0,
+      }),
+      {} as Record<(typeof sourceSummaryOrder)[number], number>,
+    );
+    let refinementQueueCount = 0;
+    let highConfidenceCount = 0;
+
+    for (const row of allRows) {
+      const source = sourceSummaryOrder.includes(row.item.classificationSource as (typeof sourceSummaryOrder)[number])
+        ? (row.item.classificationSource as (typeof sourceSummaryOrder)[number])
+        : "rules";
+
+      counts[source] += 1;
+
+      if (row.item.confidenceScore >= 0.75 && !row.item.needsReview) {
+        highConfidenceCount += 1;
+      }
+
+      if (
+        row.item.classificationSource !== "learned" &&
+        row.item.classificationSource !== "ai" &&
+        (row.item.needsReview || row.item.confidenceScore < 0.7 || row.item.classificationSource === "inherited_header")
+      ) {
+        refinementQueueCount += 1;
+      }
+    }
+
+    return {
+      counts,
+      highConfidenceCount,
+      refinementQueueCount,
+      total: allRows.length,
+    };
+  }, [allRows]);
+  const confidencePercent =
+    sourceSummary.total > 0 ? Math.round((sourceSummary.highConfidenceCount / sourceSummary.total) * 100) : 0;
 
   function displayDraft(row: FlatSystemRow) {
     return drafts[row.item.id] || savedOverrides[row.item.id] || draftForItem(row.item, row.system.name, row.category.name);
@@ -305,7 +346,7 @@ export function ProjectSystemsPanel({
         </div>
         <button
           className="inline-flex h-10 items-center justify-center rounded-xl bg-[#16a34a] px-4 text-sm font-semibold text-white shadow-[0_12px_28px_rgba(22,163,74,0.22)] transition hover:bg-[#087a36] disabled:cursor-not-allowed disabled:opacity-60"
-          disabled={isClassifying}
+          disabled={isClassifying || sourceSummary.refinementQueueCount === 0}
           onClick={async () => {
             if (isClassifying) {
               return;
@@ -341,8 +382,48 @@ export function ProjectSystemsPanel({
           type="button"
         >
           <Sparkles aria-hidden="true" className="mr-2 h-4 w-4" strokeWidth={2} />
-          {isClassifying ? "Classifying..." : "Classify BOQ"}
+          {isClassifying
+            ? "Refining..."
+            : sourceSummary.refinementQueueCount > 0
+              ? `AI refine ${sourceSummary.refinementQueueCount}`
+              : "Classification complete"}
         </button>
+      </div>
+
+      <div className="mt-5 grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,2fr)]">
+        <div className="rounded-2xl border border-[#bbf7d0] bg-[#ecfdf3] p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#087a36]">Classification progress</p>
+              <p className="mt-2 text-2xl font-semibold text-[#07130f]">{confidencePercent}%</p>
+              <p className="mt-1 text-sm text-[#64748b]">
+                {sourceSummary.highConfidenceCount.toLocaleString()} of {sourceSummary.total.toLocaleString()} rows are high confidence.
+              </p>
+            </div>
+            <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-[#087a36] ring-1 ring-[#bbf7d0]">
+              {sourceSummary.refinementQueueCount.toLocaleString()} queued
+            </span>
+          </div>
+          <div className="mt-4 h-2 overflow-hidden rounded-full bg-white">
+            <div className="h-full rounded-full bg-[#16a34a]" style={{ width: `${confidencePercent}%` }} />
+          </div>
+          <p className="mt-3 text-xs text-[#64748b]">
+            AI refinement updates low-confidence, inherited, and needs-review rows. Learned/manual rows stay locked.
+          </p>
+        </div>
+        <div className="grid gap-2 rounded-2xl border border-[#e5e7eb] bg-[#fbfdfb] p-4 sm:grid-cols-5">
+          {sourceSummaryOrder.map((source) => (
+            <button
+              className="rounded-xl border border-[#e5e7eb] bg-white p-3 text-left transition hover:border-[#bbf7d0] hover:bg-[#ecfdf3]"
+              key={source}
+              onClick={() => setSourceFilter(source)}
+              type="button"
+            >
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#94a3b8]">{sourceLabel(source)}</p>
+              <p className="mt-2 text-xl font-semibold text-[#07130f]">{sourceSummary.counts[source].toLocaleString()}</p>
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="mt-5 grid gap-3 rounded-2xl border border-[#e5e7eb] bg-[#fbfdfb] p-4 lg:grid-cols-[1fr_11rem_11rem_11rem_auto]">
