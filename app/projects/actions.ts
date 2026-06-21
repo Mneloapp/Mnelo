@@ -73,7 +73,7 @@ type ClassificationPrediction = {
 
 type BoqInsertMode = {
   fileColumns: "both" | "project_file_id" | "source_file_id";
-  optionalColumns: "full";
+  optionalColumns: "basicClassification" | "full" | "legacy" | "withoutConfidence";
 };
 
 type BoqClassificationRow = {
@@ -413,13 +413,16 @@ async function saveParsedBoqRows({
         row_number: row.row_number,
       };
 
-      if (optionalColumns === "full") {
+      if (optionalColumns !== "legacy") {
         payload.rate = row.rate;
         payload.amount = row.amount;
         payload.category = prediction.predicted_category;
         payload.subcategory = prediction.predicted_subcategory;
-        payload.classification_subcategory = prediction.predicted_classification_subcategory;
         payload.confidence_score = prediction.confidence_score;
+      }
+
+      if (optionalColumns === "full" || optionalColumns === "withoutConfidence") {
+        payload.classification_subcategory = prediction.predicted_classification_subcategory;
         payload.classification_confidence = prediction.confidence_score;
         payload.classification_reason = prediction.classification_reason;
         payload.classification_source = prediction.classification_source;
@@ -432,6 +435,10 @@ async function saveParsedBoqRows({
         payload.section_header = row.section_header;
         payload.source_row_number = row.source_row_number || row.row_number;
         payload.source_sheet_name = row.source_sheet_name || row.sheet_name;
+      }
+
+      if (optionalColumns === "withoutConfidence") {
+        delete payload.classification_confidence;
       }
 
       if (fileColumns === "both" || fileColumns === "project_file_id") {
@@ -447,11 +454,21 @@ async function saveParsedBoqRows({
 
   const insertAttempts: BoqInsertMode[] = [
     { fileColumns: "both", optionalColumns: "full" },
+    { fileColumns: "both", optionalColumns: "withoutConfidence" },
+    { fileColumns: "both", optionalColumns: "basicClassification" },
+    { fileColumns: "both", optionalColumns: "legacy" },
     { fileColumns: "source_file_id", optionalColumns: "full" },
+    { fileColumns: "source_file_id", optionalColumns: "withoutConfidence" },
+    { fileColumns: "source_file_id", optionalColumns: "basicClassification" },
+    { fileColumns: "source_file_id", optionalColumns: "legacy" },
     { fileColumns: "project_file_id", optionalColumns: "full" },
+    { fileColumns: "project_file_id", optionalColumns: "withoutConfidence" },
+    { fileColumns: "project_file_id", optionalColumns: "basicClassification" },
+    { fileColumns: "project_file_id", optionalColumns: "legacy" },
   ];
   let boqInsertError: string | null = null;
   let insertedWithFileColumns: BoqInsertMode["fileColumns"] | null = null;
+  let insertedWithOptionalColumns: BoqInsertMode["optionalColumns"] | null = null;
 
   console.info(
     `[boq-parse] preparing insert project=${projectId} file=${projectFileId} rows=${normalizedRows.length} items=${parserSummary.itemRows}`,
@@ -463,6 +480,7 @@ async function saveParsedBoqRows({
     if (!boqError) {
       boqInsertError = null;
       insertedWithFileColumns = insertMode.fileColumns;
+      insertedWithOptionalColumns = insertMode.optionalColumns;
       break;
     }
 
@@ -517,7 +535,7 @@ async function saveParsedBoqRows({
   };
 
   console.info(
-    `[boq-parse] inserted project=${projectId} file=${projectFileId} fileColumns=${insertedWithFileColumns} rows=${verification.totalRows} items=${verification.itemRows} inherited=${verification.inheritedRows}`,
+    `[boq-parse] inserted project=${projectId} file=${projectFileId} fileColumns=${insertedWithFileColumns} optionalColumns=${insertedWithOptionalColumns} rows=${verification.totalRows} items=${verification.itemRows} inherited=${verification.inheritedRows}`,
   );
 
   if (verification.totalRows === 0) {
