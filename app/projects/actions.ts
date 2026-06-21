@@ -731,11 +731,16 @@ export async function uploadProjectDocument(formData: FormData) {
     }
 
     revalidatePath(`/projects/${projectId}`);
-    return { ok: true, message: "File uploaded and BOQ parsed successfully.", parserSummary } satisfies ProjectDocumentActionResult;
+    return {
+      ok: true,
+      message: "File uploaded and BOQ parsed successfully.",
+      parserSummary,
+      projectFileId: projectFile.id,
+    } satisfies ProjectDocumentActionResult;
   }
 
   revalidatePath(`/projects/${projectId}`);
-  return { ok: true, message: "File uploaded successfully." } satisfies ProjectDocumentActionResult;
+  return { ok: true, message: "File uploaded successfully.", projectFileId: projectFile.id } satisfies ProjectDocumentActionResult;
 }
 
 export async function saveBoqColumnMappingAndParse(formData: FormData) {
@@ -828,6 +833,7 @@ export async function saveBoqColumnMappingAndParse(formData: FormData) {
     ok: true,
     message: "Column mapping saved and BOQ parsed.",
     parserSummary: saveResult.parserSummary,
+    projectFileId,
   } satisfies ProjectDocumentActionResult;
 }
 
@@ -912,6 +918,7 @@ export async function parseExistingProjectFile(formData: FormData) {
     ok: true,
     message: "BOQ parsed successfully.",
     parserSummary: saveResult.parserSummary,
+    projectFileId,
   } satisfies ProjectDocumentActionResult;
 }
 

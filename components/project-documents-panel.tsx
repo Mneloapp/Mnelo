@@ -40,6 +40,7 @@ export function ProjectDocumentsPanel({
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
   const [visibleFiles, setVisibleFiles] = useState(files);
+  const [visibleParsedFileIds, setVisibleParsedFileIds] = useState(() => new Set(parsedFileIds));
   const [notice, setNotice] = useState<Notice | null>(
     initialError
       ? { tone: "error", message: initialError }
@@ -57,6 +58,10 @@ export function ProjectDocumentsPanel({
     setVisibleFiles(files);
   }, [files]);
 
+  useEffect(() => {
+    setVisibleParsedFileIds(new Set(parsedFileIds));
+  }, [parsedFileIds]);
+
   async function handleResult(result: ProjectDocumentActionResult, successFallback: string) {
     if (!result.ok) {
       const message = result.error || "Unknown action error.";
@@ -66,6 +71,13 @@ export function ProjectDocumentsPanel({
     }
 
     setNotice({ tone: "success", message: result.message || successFallback, parserSummary: result.parserSummary });
+    if (result.projectFileId && result.parserSummary) {
+      setVisibleParsedFileIds((currentIds) => {
+        const nextIds = new Set(currentIds);
+        nextIds.add(result.projectFileId as string);
+        return nextIds;
+      });
+    }
     router.refresh();
     return true;
   }
@@ -269,7 +281,7 @@ export function ProjectDocumentsPanel({
             </div>
             <div className="divide-y divide-line">
               {visibleFiles.map((file) => {
-                const hasParsedBoq = parsedFileIds.includes(file.id);
+                const hasParsedBoq = visibleParsedFileIds.has(file.id);
                 const isDeleting = deletingFileId === file.id;
                 const isParsing = parsingFileId === file.id;
                 const canParse = ["xlsx", "xls"].includes(file.fileType.toLowerCase());
@@ -361,6 +373,11 @@ export function ProjectDocumentsPanel({
                             const ok = await handleResult(result, "File deleted successfully.");
 
                             if (ok) {
+                              setVisibleParsedFileIds((currentIds) => {
+                                const nextIds = new Set(currentIds);
+                                nextIds.delete(file.id);
+                                return nextIds;
+                              });
                               setVisibleFiles((currentFiles) =>
                                 currentFiles.filter((currentFile) => currentFile.id !== file.id),
                               );

@@ -427,6 +427,18 @@ function getBoqCleanupSummary(items: BoqItem[]) {
   } satisfies BoqCleanupSummary;
 }
 
+function filterBoqRowsForExistingFiles(rows: BoqItemRow[], validFileIds: Set<string>) {
+  if (validFileIds.size === 0) {
+    return [];
+  }
+
+  return rows.filter((row) => {
+    const sourceFileId = row.source_file_id || row.project_file_id;
+
+    return Boolean(sourceFileId && validFileIds.has(sourceFileId));
+  });
+}
+
 export function mapLearningRecord(row: LearningRecordRow): LearningRecord {
   const predictedCategory = row.predicted_category || "General";
   const predictedSubcategory = row.predicted_subcategory || "Unclassified";
@@ -693,29 +705,34 @@ export async function getBoqItemsForCurrentUser(projectId: string) {
   }
 
   const supabase = await createSupabaseServerClient();
-  const { data, error } = await supabase
-    .from("boq_items")
-    .select("*")
-    .eq("project_id", projectId)
-    .eq("user_id", userId)
-    .order("created_at", { ascending: true })
-    .order("sheet_name", { ascending: true })
-    .order("row_number", { ascending: true });
+  const [filesResult, boqResult] = await Promise.all([
+    supabase.from("project_files").select("id").eq("project_id", projectId).eq("user_id", userId),
+    supabase
+      .from("boq_items")
+      .select("*")
+      .eq("project_id", projectId)
+      .eq("user_id", userId)
+      .order("created_at", { ascending: true })
+      .order("sheet_name", { ascending: true })
+      .order("row_number", { ascending: true }),
+  ]);
 
-  if (error) {
+  if (boqResult.error) {
     return {
       items: [],
       cleanupSummary: { ignoredRows: 0, itemRows: 0, parsedRows: 0 },
-      errorMessage: error.message,
+      errorMessage: boqResult.error.message,
     } satisfies BoqItemsQueryResult;
   }
 
-  const items = (data as BoqItemRow[]).map(mapBoqItem);
+  const validFileIds = new Set(((filesResult.data || []) as Array<{ id: string }>).map((file) => file.id));
+  const rows = filterBoqRowsForExistingFiles((boqResult.data || []) as BoqItemRow[], validFileIds);
+  const items = rows.map(mapBoqItem);
 
   return {
     cleanupSummary: getBoqCleanupSummary(items),
     items,
-    errorMessage: null,
+    errorMessage: filesResult.error?.message || null,
   } satisfies BoqItemsQueryResult;
 }
 
@@ -736,19 +753,25 @@ export async function getProjectSystemsForCurrentUser(projectId: string) {
   }
 
   const supabase = await createSupabaseServerClient();
-  const { data, error } = await supabase
-    .from("boq_items")
-    .select("*")
-    .eq("project_id", projectId)
-    .eq("user_id", userId)
-    .order("row_number", { ascending: true });
+  const [filesResult, boqResult] = await Promise.all([
+    supabase.from("project_files").select("id").eq("project_id", projectId).eq("user_id", userId),
+    supabase
+      .from("boq_items")
+      .select("*")
+      .eq("project_id", projectId)
+      .eq("user_id", userId)
+      .order("row_number", { ascending: true }),
+  ]);
 
-  if (error) {
+  if (boqResult.error) {
     return {
       systems: [],
-      errorMessage: error.message,
+      errorMessage: boqResult.error.message,
     } satisfies ProjectSystemsQueryResult;
   }
+
+  const validFileIds = new Set(((filesResult.data || []) as Array<{ id: string }>).map((file) => file.id));
+  const rows = filterBoqRowsForExistingFiles((boqResult.data || []) as BoqItemRow[], validFileIds);
 
   const systems = new Map<
     string,
@@ -768,7 +791,7 @@ export async function getProjectSystemsForCurrentUser(projectId: string) {
     }
   >();
 
-  for (const row of (data || []) as BoqItemRow[]) {
+  for (const row of rows) {
     if (row.row_type && row.row_type !== "item") {
       continue;
     }
@@ -871,7 +894,7 @@ export async function getProjectSystemsForCurrentUser(projectId: string) {
         units: sortedUnitTotals(system.unitTotals),
       }))
       .sort((a, b) => b.itemCount - a.itemCount),
-    errorMessage: null,
+    errorMessage: filesResult.error?.message || null,
   } satisfies ProjectSystemsQueryResult;
 }
 
