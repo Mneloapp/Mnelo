@@ -4,6 +4,7 @@ import {
   NEEDS_REVIEW_SYSTEM,
   normalizeTakeoffUnit,
 } from "@/lib/classification";
+import { normalizeParsedBoqRows, parseBoqWorkbook } from "@/lib/boq-parser";
 import type { BoqRowType } from "@/lib/boq-cleanup";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -534,6 +535,108 @@ function applyReadTimeExcelContext(rows: BoqItemRow[]) {
   });
 }
 
+function excelContextKey(fileId: string, sheetName: string | null | undefined, rowNumber: number | null | undefined) {
+  return `${fileId}:${sheetName || "sheet"}:${rowNumber || 0}`;
+}
+
+function rowsNeedStorageContextRepair(rows: BoqItemRow[]) {
+  const itemRows = rows.filter((row) => !row.row_type || row.row_type === "item");
+
+  if (itemRows.length === 0) {
+    return false;
+  }
+
+  const rowsWithContext = itemRows.filter((row) => row.section_header || row.inherited_category || row.inherited_subcategory).length;
+
+  return rowsWithContext / itemRows.length < 0.25;
+}
+
+async function buildStorageExcelContextMap({
+  files,
+  supabase,
+}: {
+  files: ProjectFileRow[];
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+}) {
+  const context = new Map<
+    string,
+    {
+      inheritedCategory: string | null;
+      inheritedSubcategory: string | null;
+      rowType: BoqRowType;
+      sectionHeader: string | null;
+      sourceRowNumber: number;
+      sourceSheetName: string;
+    }
+  >();
+
+  for (const file of files) {
+    if (!["xls", "xlsx"].includes(String(file.file_type || "").toLowerCase())) {
+      continue;
+    }
+
+    const { data: blob, error } = await supabase.storage.from("project-documents").download(file.storage_path);
+
+    if (error || !blob) {
+      console.info(`[boq-display] skipped Excel context repair for file=${file.id}: ${error?.message || "download failed"}`);
+      continue;
+    }
+
+    try {
+      const parsedRows = normalizeParsedBoqRows(await parseBoqWorkbook(blob));
+
+      for (const row of parsedRows) {
+        context.set(excelContextKey(file.id, row.source_sheet_name || row.sheet_name, row.source_row_number || row.row_number), {
+          inheritedCategory: row.inherited_category || null,
+          inheritedSubcategory: row.inherited_subcategory || null,
+          rowType: row.row_type || "item",
+          sectionHeader: row.section_header || null,
+          sourceRowNumber: row.source_row_number || row.row_number,
+          sourceSheetName: row.source_sheet_name || row.sheet_name,
+        });
+      }
+    } catch (error) {
+      console.info(
+        `[boq-display] skipped Excel context repair for file=${file.id}: ${
+          error instanceof Error ? error.message : "parse failed"
+        }`,
+      );
+    }
+  }
+
+  return context;
+}
+
+function applyStorageExcelContext(rows: BoqItemRow[], context: Awaited<ReturnType<typeof buildStorageExcelContextMap>>) {
+  if (context.size === 0) {
+    return rows;
+  }
+
+  return rows.map((row) => {
+    const fileId = row.source_file_id || row.project_file_id;
+
+    if (!fileId) {
+      return row;
+    }
+
+    const match = context.get(excelContextKey(fileId, row.source_sheet_name || row.sheet_name, row.source_row_number || row.row_number));
+
+    if (!match) {
+      return row;
+    }
+
+    return {
+      ...row,
+      inherited_category: row.inherited_category || match.inheritedCategory,
+      inherited_subcategory: row.inherited_subcategory || match.inheritedSubcategory,
+      row_type: row.row_type || match.rowType,
+      section_header: row.section_header || match.sectionHeader,
+      source_row_number: row.source_row_number || match.sourceRowNumber,
+      source_sheet_name: row.source_sheet_name || match.sourceSheetName,
+    };
+  });
+}
+
 function firstMeaningfulValue(...values: Array<null | string | undefined>) {
   return values.find((value) => {
     const normalized = value?.trim();
@@ -835,7 +938,7 @@ export async function getBoqItemsForCurrentUser(projectId: string) {
 
   const supabase = await createSupabaseServerClient();
   const [filesResult, boqResult] = await Promise.all([
-    supabase.from("project_files").select("id").eq("project_id", projectId).eq("user_id", userId),
+    supabase.from("project_files").select("*").eq("project_id", projectId).eq("user_id", userId),
     supabase
       .from("boq_items")
       .select("*")
@@ -854,10 +957,15 @@ export async function getBoqItemsForCurrentUser(projectId: string) {
     } satisfies BoqItemsQueryResult;
   }
 
-  const validFileIds = new Set(((filesResult.data || []) as Array<{ id: string }>).map((file) => file.id));
-  const rows = applyReadTimeExcelContext(
-    filterBoqRowsForExistingFiles((boqResult.data || []) as BoqItemRow[], validFileIds),
-  );
+  const projectFiles = (filesResult.data || []) as ProjectFileRow[];
+  const validFileIds = new Set(projectFiles.map((file) => file.id));
+  let rows = filterBoqRowsForExistingFiles((boqResult.data || []) as BoqItemRow[], validFileIds);
+
+  if (rowsNeedStorageContextRepair(rows)) {
+    rows = applyStorageExcelContext(rows, await buildStorageExcelContextMap({ files: projectFiles, supabase }));
+  }
+
+  rows = applyReadTimeExcelContext(rows);
   const items = rows.map(mapBoqItem);
 
   return {
@@ -885,7 +993,7 @@ export async function getProjectSystemsForCurrentUser(projectId: string) {
 
   const supabase = await createSupabaseServerClient();
   const [filesResult, boqResult] = await Promise.all([
-    supabase.from("project_files").select("id").eq("project_id", projectId).eq("user_id", userId),
+    supabase.from("project_files").select("*").eq("project_id", projectId).eq("user_id", userId),
     supabase
       .from("boq_items")
       .select("*")
@@ -901,10 +1009,15 @@ export async function getProjectSystemsForCurrentUser(projectId: string) {
     } satisfies ProjectSystemsQueryResult;
   }
 
-  const validFileIds = new Set(((filesResult.data || []) as Array<{ id: string }>).map((file) => file.id));
-  const rows = applyReadTimeExcelContext(
-    filterBoqRowsForExistingFiles((boqResult.data || []) as BoqItemRow[], validFileIds),
-  );
+  const projectFiles = (filesResult.data || []) as ProjectFileRow[];
+  const validFileIds = new Set(projectFiles.map((file) => file.id));
+  let rows = filterBoqRowsForExistingFiles((boqResult.data || []) as BoqItemRow[], validFileIds);
+
+  if (rowsNeedStorageContextRepair(rows)) {
+    rows = applyStorageExcelContext(rows, await buildStorageExcelContextMap({ files: projectFiles, supabase }));
+  }
+
+  rows = applyReadTimeExcelContext(rows);
 
   const systems = new Map<
     string,
