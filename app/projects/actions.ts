@@ -1313,6 +1313,11 @@ async function updateBoqItemClassification({
     confidence_score: classification.confidenceScore,
     subcategory: classification.categoryName,
   };
+  const legacyBasePayload = {
+    category: classification.systemName,
+    confidence_score: classification.confidenceScore,
+    subcategory: classification.categoryName,
+  };
   const updateAttempts: Array<Record<string, unknown>> = [
     {
       ...basePayload,
@@ -1337,6 +1342,18 @@ async function updateBoqItemClassification({
       takeoff_quantity: takeoffQuantity,
       takeoff_unit: takeoffUnit,
     },
+    {
+      ...legacyBasePayload,
+      classification_confidence: classification.confidenceScore,
+      classification_reason: classification.reason || null,
+      classification_source: classificationSource,
+      classification_status: needsReview ? "needs_review" : "classified",
+      needs_review: needsReview,
+      takeoff_quantity: takeoffQuantity,
+      takeoff_unit: takeoffUnit,
+      updated_at: new Date().toISOString(),
+    },
+    legacyBasePayload,
     basePayload,
     {
       category: classification.systemName,
@@ -1886,13 +1903,31 @@ export async function bulkCorrectBoqItemClassifications(formData: FormData) {
 
     const itemIds = Array.from(new Set(changes.map((change) => change.itemId)));
     const changesById = new Map(changes.map((change) => [change.itemId, change]));
-    const { data: rows, error: rowsError } = await supabase
+    const rowsResult = await supabase
       .from("boq_items")
       .select("id, description, quantity, unit, amount, category, subcategory, classification_subcategory, source_file_id, project_file_id, row_type")
       .eq("project_id", projectId)
       .eq("user_id", user.id)
       .eq("row_type", "item")
       .in("id", itemIds);
+    let rows = rowsResult.data as unknown[] | null;
+    let rowsError = rowsResult.error;
+
+    if (
+      rowsError &&
+      (rowsError.message.includes("classification_subcategory") || rowsError.message.includes("schema cache"))
+    ) {
+      const fallbackRows = await supabase
+        .from("boq_items")
+        .select("id, description, quantity, unit, amount, category, subcategory, source_file_id, project_file_id, row_type")
+        .eq("project_id", projectId)
+        .eq("user_id", user.id)
+        .eq("row_type", "item")
+        .in("id", itemIds);
+
+      rows = fallbackRows.data as unknown[] | null;
+      rowsError = fallbackRows.error;
+    }
 
     if (rowsError) {
       return { ok: false, error: rowsError.message } satisfies ProjectDocumentActionResult;
