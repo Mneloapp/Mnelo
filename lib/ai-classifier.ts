@@ -10,7 +10,7 @@ import {
   type SystemClassification,
 } from "@/lib/classification";
 
-const OPENAI_TIMEOUT_MS = 12_000;
+const OPENAI_TIMEOUT_MS = 20_000;
 
 export type AiBoqItemInput = {
   id: string;
@@ -20,6 +20,8 @@ export type AiBoqItemInput = {
   currentSystem?: string | null;
   currentCategory?: string | null;
   currentSubcategory?: string | null;
+  sectionHeader?: string | null;
+  sheetName?: string | null;
 };
 
 type AiClassificationOutput = {
@@ -170,6 +172,7 @@ Rules:
 - Classify only from the item description, unit, and minimal row context provided.
 - Do not invent quantities, rates, amounts, suppliers, or project facts.
 - Prefer the closest approved system, category, and subcategory when the product, material, equipment, or work scope is recognizable.
+- Use sheet_name as discipline/system context and section_header as category context when present.
 - Use "${NEEDS_REVIEW_SYSTEM}" only when the text is too vague or cannot be confidently mapped to the approved taxonomy.
 - Return null for category or subcategory when uncertain.
 - Do not invent a new taxonomy value.
@@ -191,9 +194,14 @@ ${classificationTaxonomy
               {
                 text: JSON.stringify({
                   items: items.map((item) => ({
+                    current_category: item.currentCategory,
+                    current_subcategory: item.currentSubcategory,
+                    current_system: item.currentSystem,
                     description: item.description,
                     id: item.id,
                     quantity: item.quantity,
+                    section_header: item.sectionHeader,
+                    sheet_name: item.sheetName,
                     unit: item.unit,
                   })),
                 }),

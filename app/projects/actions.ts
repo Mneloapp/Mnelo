@@ -26,8 +26,8 @@ import type { DocumentType } from "@/lib/data";
 
 const documentTypes = ["BOQ Excel", "Specification PDF", "Drawing PDF", "Other"] satisfies DocumentType[];
 const allowedExtensions = [".xlsx", ".xls", ".pdf"];
-const AI_CLASSIFICATION_BATCH_SIZE = 15;
-const MAX_AI_CLASSIFICATION_ITEMS_PER_RUN = 15;
+const AI_CLASSIFICATION_BATCH_SIZE = 20;
+const MAX_AI_CLASSIFICATION_ITEMS_PER_RUN = 80;
 type ParsedBoqRow = {
   description: string;
   quantity: number | null;
@@ -1549,7 +1549,9 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
         (candidate) =>
           candidate.source !== "learned" &&
           candidate.source !== "ai" &&
-          (candidate.classification.systemName === NEEDS_REVIEW_SYSTEM || candidate.classification.confidenceScore < 0.7),
+          (candidate.classification.systemName === NEEDS_REVIEW_SYSTEM ||
+            candidate.classification.confidenceScore < 0.7 ||
+            candidate.source === "inherited_header"),
       );
     const aiCandidates = allAiCandidates.slice(0, MAX_AI_CLASSIFICATION_ITEMS_PER_RUN);
     const skippedAiCandidateCount = allAiCandidates.length - aiCandidates.length;
@@ -1575,6 +1577,8 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
           description: candidate.row.description,
           id: candidate.row.id,
           quantity: candidate.row.quantity,
+          sectionHeader: candidate.row.section_header,
+          sheetName: candidate.row.source_sheet_name,
           unit: candidate.row.unit,
         })),
       );
@@ -1594,7 +1598,12 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
 
         const currentClassification = classifications[candidate.index];
         const aiIsUseful =
-          currentClassification.source !== "learned" && currentClassification.confidenceScore < 0.7;
+          currentClassification.source !== "learned" &&
+          (currentClassification.confidenceScore < 0.7 ||
+            currentClassification.systemName === NEEDS_REVIEW_SYSTEM ||
+            (currentClassification.source === "inherited_header" &&
+              aiClassification.systemName === currentClassification.systemName &&
+              aiClassification.confidenceScore >= 0.75));
 
         if (aiIsUseful) {
           classifications[candidate.index] = aiClassification;

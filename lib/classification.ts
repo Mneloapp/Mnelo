@@ -413,27 +413,47 @@ const taxonomy = [
 ] satisfies TaxonomySystem[];
 
 const extraKeywordAliases = new Map<string, string[]>([
-  ["Cooling Equipment", ["cooling equipment", "cooling units", "გაგრილების მოწყობილობები", "გაგრილების დანადგარები"]],
+  ["Cooling Equipment", ["cooling equipment", "cooling units", "გაგრილების მოწყობილობები", "გაგრილების დანადგარები", "კასეტური ფანკოილი", "fan coil", "ფანკოილი"]],
   ["AHU", ["air handling unit", "ahu"]],
-  ["Fan Coil Units", ["fcu", "fan coil"]],
+  ["Fan Coil Units", ["fcu", "fan coil", "ფანკოილი"]],
   ["VRF Indoor Units", ["vrf indoor"]],
   ["VRF Outdoor Units", ["vrf outdoor"]],
   ["DX Units", ["dx unit", "split unit"]],
-  ["Power Cables", ["cable", "კაბელ", "кабель"]],
+  ["Ductwork", ["duct", "ductwork", "ჰაერსატარ", "воздуховод"]],
+  ["Duct Fittings", ["duct fitting", "elbow duct", "ფასონური", "fason", "отвод воздуховод"]],
+  ["Grilles", ["grille", "გისოს", "решетка"]],
+  ["Diffusers", ["diffuser", "დიფუზორ", "диффузор"]],
+  ["Fire Dampers", ["fire damper", "სახანძრო სარქველი", "клапан противопожар"]],
+  ["Power Cables", ["power cable", "electrical cable", "კაბელ", "кабель"]],
   ["Lighting Fixtures", ["luminaire", "light fixture", "სანათი", "светильник"]],
-  ["Distribution Boards", ["distribution board", "db", "panel board", "გამანაწილებელი", "щит"]],
+  ["Distribution Boards", ["distribution board", "db", "panel board", "გამანაწილებელი", "ფარი", "კარადა", "щит"]],
+  ["Main Distribution Boards", ["mdb", "mdbg", "main distribution"]],
+  ["Sub Distribution Boards", ["ldb", "pdb", "fdb", "distribution panel"]],
+  ["Cable Trays", ["cable tray", "კაბელსატარი", "საკაბელო არხი", "лоток"]],
   ["Conduits", ["conduit", "pvc pipe electrical", "ელექტრო მილი"]],
   ["Sockets", ["socket", "outlet", "როზეტი", "розетка"]],
   ["Switches", ["switch", "ჩამრთველი", "выключатель"]],
   ["Fire Alarm", ["fire alarm", "სახანძრო სიგნალიზაცია", "пожарная сигнализация"]],
+  ["Fire Alarm Control Panel", ["fire alarm panel", "სახანძრო პანელი"]],
+  ["Smoke Detectors", ["smoke detector", "კვამლის დეტექტორი"]],
+  ["Manual Call Points", ["manual call point", "საგანგაშო ღილაკი"]],
+  ["Sounders", ["sounder", "siren", "სირენა"]],
   ["CCTV Cameras", ["camera", "cctv camera", "კამერა", "камера"]],
-  ["Network Cabling", ["utp", "data cable", "lan cable", "ქსელი"]],
+  ["Network Cabling", ["utp", "data cable", "lan cable", "ქსელი", "ინტერნეტის როზეტი", "keystone"]],
+  ["Wi-Fi Access Points", ["wifi", "wi-fi", "wireless access point", "უკაბელო წვდომის წერტილი"]],
+  ["Speakers", ["speaker", "loudspeaker", "დინამიკ", "ხმის გამაძლიერებელი"]],
   ["Water Supply Pipes", ["water pipe", "წყლის მილი", "водопроводная труба"]],
+  ["PPR Pipes", ["ppr", "ppr pipe", "ცივი წყლის მილი", "ცხელი წყლის მილი"]],
   ["Drainage Pipes", ["drain pipe", "sewer pipe", "საკანალიზაციო", "канализационная труба"]],
   ["WC", ["toilet", "water closet", "უნიტაზი", "унитаз"]],
   ["Wash Basins", ["basin", "lavatory", "ხელსაბანი", "раковина"]],
+  ["Mixers", ["mixer", "შემრევი"]],
+  ["Valves", ["valve", "ურდული", "სარქველი", "клапан", "задвижка"]],
+  ["Sprinkler Pipes", ["fire pipe", "sprinkler pipe", "ხანძარქრობის სისტემისთვის", "ფოლადის მილი"]],
   ["Sprinkler Heads", ["sprinkler head", "спринклер", "სპრინკლერი"]],
   ["Fire Cabinets", ["fire cabinet", "hose cabinet", "სახანძრო კარადა"]],
+  ["Fire Pumps", ["fire pump", "სატუმბი სადგური", "სახანძრო ტუმბო"]],
+  ["Fire Water Tanks", ["fire water tank", "სახანძროს რეზერვუარი", "რეზერვუარი"]],
   ["Excavation", ["excavation", "trench", "გათხრა", "земляные работы"]],
   ["Rebar", ["rebar", "reinforcement", "არმატურა", "арматура"]],
   ["Formwork", ["formwork", "ყალიბი", "опалубка"]],
@@ -461,8 +481,8 @@ export const systemRules: SystemRule[] = taxonomy.flatMap((system) =>
   system.categories.flatMap((category) =>
     category.subcategories.map((subcategory) => ({
       categoryName: category.name,
-      keywords: [...wordsFromName(subcategory), subcategory, ...(extraKeywordAliases.get(subcategory) || [])],
-      strongKeywords: [subcategory, ...(system.aliases || [])],
+      keywords: [...wordsFromName(category.name), ...wordsFromName(subcategory), category.name, subcategory, ...(extraKeywordAliases.get(subcategory) || [])],
+      strongKeywords: [subcategory, ...(extraKeywordAliases.get(subcategory) || [])],
       subcategoryName: subcategory,
       supplierType: system.supplierType,
       systemName: system.name,
@@ -478,6 +498,25 @@ const sheetSystemAliases = [
   { systemName: "Fire Fighting", aliases: ["fire fighting", "firefighting"] },
   { systemName: "Electrical", aliases: ["electricity", "electrical"] },
   { systemName: "Low Current", aliases: ["fire alarm", "public address", "data", "network", "cctv", "access control", "door phone"] },
+];
+const contextualSectionAliases = [
+  { systemName: "HVAC", categoryName: "HVAC Equipment", subcategoryName: "Cooling Equipment", aliases: ["გაგრილების მოწყობილობები", "გაგრილების დანადგარები", "cooling"] },
+  { systemName: "HVAC", categoryName: "Air Distribution", subcategoryName: "Ductwork", aliases: ["ჰაერსატარები", "ductwork", "ducts"] },
+  { systemName: "HVAC", categoryName: "Air Distribution", subcategoryName: "Duct Fittings", aliases: ["ჰაერსატარების ფასონური", "ფასონური ნაწილები", "duct fittings"] },
+  { systemName: "HVAC", categoryName: "Hydronic & Refrigerant Piping", subcategoryName: "Refrigerant Pipes", aliases: ["მილები", "refrigerant pipes", "piping"] },
+  { systemName: "Plumbing", categoryName: "Water Supply Piping", subcategoryName: "Water Supply Pipes", aliases: ["წყალმომარაგება", "water supply"] },
+  { systemName: "Plumbing", categoryName: "Drainage", subcategoryName: "Drainage Pipes", aliases: ["კანალიზ", "დრენაჟ", "drainage"] },
+  { systemName: "Fire Fighting", categoryName: "Fire Piping", subcategoryName: "Sprinkler Pipes", aliases: ["sum", "მილები", "ხანძარქრობის", "fire pipe"] },
+  { systemName: "Fire Fighting", categoryName: "Fire Pumps", subcategoryName: "Fire Pumps", aliases: ["სატუმბი სადგური", "pump station"] },
+  { systemName: "Electrical", categoryName: "Panels & Distribution", subcategoryName: "Distribution Boards", aliases: ["გამანაწილებელი ფარები", "mdb", "mdbg", "ldb", "pdb", "fdb"] },
+  { systemName: "Electrical", categoryName: "Cables & Termination", subcategoryName: "Power Cables", aliases: ["კაბელები", "power cables"] },
+  { systemName: "Electrical", categoryName: "Containment", subcategoryName: "Cable Trays", aliases: ["საკაბელო კონსტრუქციები", "კაბელსატარი", "cable tray"] },
+  { systemName: "Electrical", categoryName: "Small Power", subcategoryName: "Sockets", aliases: ["ფურნიტურა", "როზეტი"] },
+  { systemName: "Electrical", categoryName: "Earthing & Protection", subcategoryName: "Earthing", aliases: ["დამიწება", "earthing"] },
+  { systemName: "Electrical", categoryName: "Earthing & Protection", subcategoryName: "Lightning Protection", aliases: ["მეხამრიდი", "lightning protection"] },
+  { systemName: "Low Current", categoryName: "Fire Alarm", subcategoryName: "Fire Alarm", aliases: ["სახანძრო სიგნალიზაცია", "fire alarm"] },
+  { systemName: "Low Current", categoryName: "Public Address", subcategoryName: "Public Address", aliases: ["გახმოვანების სისტემა", "public address"] },
+  { systemName: "Low Current", categoryName: "Network & Structured Cabling", subcategoryName: "Network Cabling", aliases: ["it", "data", "network", "კაბელები"] },
 ];
 
 function tokenize(value: string) {
@@ -607,20 +646,35 @@ export function inferSystemFromSheetName(sheetName?: string | null) {
 
 export function inferClassificationFromExcelContext(sheetName?: string | null, sectionHeader?: string | null): SystemClassification | null {
   const inferredSystem = inferSystemFromSheetName(sheetName);
-  const text = [sheetName, sectionHeader].filter(Boolean).join(" ");
-  const ruleClassification = text ? classifyBoqSystem(text, inferredSystem || undefined, undefined, undefined) : null;
+  const sectionText = sectionHeader || "";
+  const contextualMatch =
+    inferredSystem && sectionText
+      ? contextualSectionAliases.find(
+          (entry) =>
+            entry.systemName === inferredSystem &&
+            entry.aliases.some((alias) => {
+              const normalizedAlias = normalizeText(alias);
+              const normalizedSection = normalizeText(sectionText);
+
+              return normalizedSection === normalizedAlias || normalizedSection.includes(normalizedAlias);
+            }),
+        )
+      : null;
+  const ruleClassification = sectionText ? classifyBoqSystem(sectionText, inferredSystem || undefined, undefined, undefined) : null;
   const systemName = inferredSystem || (ruleClassification?.systemName !== NEEDS_REVIEW_SYSTEM ? ruleClassification?.systemName : null);
 
   if (!systemName) {
     return null;
   }
 
-  const categoryName =
-    ruleClassification && ruleClassification.systemName === systemName && ruleClassification.categoryName !== NEEDS_REVIEW_CATEGORY
+  const categoryName = contextualMatch
+    ? contextualMatch.categoryName
+    : ruleClassification && ruleClassification.systemName === systemName && ruleClassification.categoryName !== NEEDS_REVIEW_CATEGORY
       ? ruleClassification.categoryName
       : getDefaultCategory(systemName);
-  const subcategoryName =
-    ruleClassification &&
+  const subcategoryName = contextualMatch
+    ? contextualMatch.subcategoryName
+    : ruleClassification &&
     ruleClassification.systemName === systemName &&
     ruleClassification.subcategoryName &&
     ruleClassification.subcategoryName !== NEEDS_REVIEW_SUBCATEGORY
@@ -656,7 +710,11 @@ export function classifyBoqSystem(
   existingSubcategory?: string | null,
   existingClassificationSubcategory?: string | null,
 ): SystemClassification {
-  const match = systemRules
+  const candidateRules =
+    existingCategory && taxonomyBySystem.has(existingCategory)
+      ? systemRules.filter((rule) => rule.systemName === existingCategory)
+      : systemRules;
+  const match = candidateRules
     .map((rule) => ({
       ...rule,
       ...scoreRule(description, rule),
