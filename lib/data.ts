@@ -1,4 +1,9 @@
-import { classifyBoqSystem, NEEDS_REVIEW_SYSTEM, normalizeTakeoffUnit } from "@/lib/classification";
+import {
+  classifyBoqSystem,
+  inferClassificationFromExcelContext,
+  NEEDS_REVIEW_SYSTEM,
+  normalizeTakeoffUnit,
+} from "@/lib/classification";
 import type { BoqRowType } from "@/lib/boq-cleanup";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -797,7 +802,13 @@ export async function getProjectSystemsForCurrentUser(projectId: string) {
     }
 
     const item = mapBoqItem(row);
-    const classification = classifyBoqSystem(item.description, item.category, item.subcategory, item.classificationSubcategory);
+    const excelClassification = inferClassificationFromExcelContext(
+      item.sourceSheetName || item.sheetName,
+      item.sectionHeader || item.inheritedSubcategory || item.inheritedCategory,
+    );
+    const classification =
+      excelClassification ||
+      classifyBoqSystem(item.description, item.category, item.subcategory, item.classificationSubcategory);
     const systemName = item.category && item.category !== "General" ? item.category : classification.systemName;
     const categoryName =
       item.subcategory && item.subcategory !== "Unclassified" ? item.subcategory : classification.categoryName;

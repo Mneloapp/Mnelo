@@ -387,8 +387,13 @@ async function saveParsedBoqRows({
   const normalizedRows = normalizeParsedBoqRowsShared(rows);
   const parserSummary = getBoqParserSummary(normalizedRows);
   logBoqParserDebugSummary(projectId, normalizedRows);
-  const buildBoqRows = ({ fileColumns, optionalColumns }: BoqInsertMode) =>
-    normalizedRows.map((row) => {
+  const buildBoqRows = ({ fileColumns, optionalColumns }: BoqInsertMode) => {
+    const rowsForInsert =
+      optionalColumns === "full" || optionalColumns === "withoutConfidence"
+        ? normalizedRows
+        : normalizedRows.filter((row) => row.row_type === "item");
+
+    return rowsForInsert.map((row) => {
       const rowType = row.row_type || "item";
       const prediction =
         rowType === "item"
@@ -451,6 +456,7 @@ async function saveParsedBoqRows({
 
       return payload;
     });
+  };
 
   const insertAttempts: BoqInsertMode[] = [
     { fileColumns: "both", optionalColumns: "full" },
