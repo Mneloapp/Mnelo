@@ -6,7 +6,7 @@ import {
   type SystemClassification,
 } from "@/lib/classification";
 
-const OPENAI_TIMEOUT_MS = 20_000;
+const OPENAI_TIMEOUT_MS = 12_000;
 
 export type AiBoqItemInput = {
   id: string;

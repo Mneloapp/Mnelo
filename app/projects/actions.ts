@@ -15,6 +15,8 @@ import type { DocumentType } from "@/lib/data";
 
 const documentTypes = ["BOQ Excel", "Specification PDF", "Drawing PDF", "Other"] satisfies DocumentType[];
 const allowedExtensions = [".xlsx", ".xls", ".pdf"];
+const AI_CLASSIFICATION_BATCH_SIZE = 15;
+const MAX_AI_CLASSIFICATION_ITEMS_PER_RUN = 45;
 const descriptionHeaders = [
   "description",
   "item",
@@ -94,6 +96,10 @@ type BoqClassificationRow = {
   amount?: number | null;
   category?: string | null;
   subcategory?: string | null;
+  classification_confidence?: number | null;
+  classification_reason?: string | null;
+  classification_source?: ClassificationSource | null;
+  needs_review?: boolean | null;
 };
 
 type LearnedClassification = {
@@ -103,6 +109,10 @@ type LearnedClassification = {
   user_corrected_category: string | null;
   user_corrected_subcategory: string | null;
 };
+
+function isClassificationSource(value: unknown): value is ClassificationSource {
+  return value === "ai" || value === "learned" || value === "needs_review" || value === "rules";
+}
 
 export type ProjectDocumentActionResult = {
   ok: boolean;
@@ -1293,7 +1303,9 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
 
   const boqResult = await supabase
     .from("boq_items")
-    .select("id, description, quantity, unit, amount, category, subcategory")
+    .select(
+      "id, description, quantity, unit, amount, category, subcategory, classification_confidence, classification_reason, classification_source, needs_review",
+    )
     .eq("project_id", projectId)
     .eq("user_id", user.id);
   let data: unknown[] | null = boqResult.data;
@@ -1304,7 +1316,11 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
     (error.message.includes("schema cache") ||
       error.message.includes("amount") ||
       error.message.includes("category") ||
-      error.message.includes("subcategory"))
+      error.message.includes("subcategory") ||
+      error.message.includes("classification_confidence") ||
+      error.message.includes("classification_reason") ||
+      error.message.includes("classification_source") ||
+      error.message.includes("needs_review"))
   ) {
     const fallbackResult = await supabase
       .from("boq_items")
@@ -1329,16 +1345,51 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
   const learnedClassifications = await getLearnedClassifications(supabase, user.id);
   const classificationSources: Array<{ classification: SystemClassification; source: ClassificationSource }> = rows.map((row) => {
     const learnedClassification = findLearnedClassification(row.description, learnedClassifications);
+    const persistedSource = isClassificationSource(row.classification_source) ? row.classification_source : null;
+
+    if (learnedClassification) {
+      return {
+        classification: {
+          ...learnedClassification,
+          reason: "Matched a previous user correction.",
+          source: "learned",
+        } satisfies SystemClassification,
+        source: "learned",
+      };
+    }
+
+    if (
+      (persistedSource === "learned" || persistedSource === "ai") &&
+      row.category &&
+      row.subcategory &&
+      !row.needs_review &&
+      Number(row.classification_confidence || 0) >= 0.7
+    ) {
+      return {
+        classification: {
+          categoryName: row.subcategory,
+          confidenceScore: Number(row.classification_confidence || 0.8),
+          reason:
+            row.classification_reason ||
+            (persistedSource === "learned"
+              ? "User confirmed this classification."
+              : "Previously classified by AI."),
+          source: persistedSource,
+          supplierType: classifyBoqSystem(row.description, row.category, row.subcategory).supplierType,
+          systemName: row.category,
+        } satisfies SystemClassification,
+        source: persistedSource,
+      };
+    }
+
     const localClassification = learnedClassification || classifyBoqSystem(row.description, row.category, row.subcategory);
-    const source = (learnedClassification ? "learned" : localClassification.systemName === NEEDS_REVIEW_SYSTEM ? "needs_review" : "rules") satisfies ClassificationSource;
+    const source = (localClassification.systemName === NEEDS_REVIEW_SYSTEM ? "needs_review" : "rules") satisfies ClassificationSource;
 
     return {
       classification: {
         ...localClassification,
         reason:
-          source === "learned"
-            ? "Matched a previous user correction."
-            : source === "needs_review"
+          source === "needs_review"
               ? "Local classifier could not confidently map this item."
               : "Matched local classification rules.",
         source,
@@ -1351,18 +1402,25 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
   let aiError: string | null = null;
 
   if (isAiClassificationConfigured()) {
-    const aiCandidates = rows
+    const allAiCandidates = rows
       .map((row, index) => ({ classification: classifications[index], index, row, source: classificationSources[index].source }))
       .filter(
         (candidate) =>
           candidate.source !== "learned" &&
+          candidate.source !== "ai" &&
           (candidate.classification.systemName === NEEDS_REVIEW_SYSTEM || candidate.classification.confidenceScore < 0.7),
       );
+    const aiCandidates = allAiCandidates.slice(0, MAX_AI_CLASSIFICATION_ITEMS_PER_RUN);
+    const skippedAiCandidateCount = allAiCandidates.length - aiCandidates.length;
 
-    console.log(`BOQ AI classification fallback: ${aiCandidates.length} item(s), ${Math.ceil(aiCandidates.length / 20)} batch(es).`);
+    console.log(
+      `BOQ AI classification fallback: ${aiCandidates.length} item(s), ${Math.ceil(
+        aiCandidates.length / AI_CLASSIFICATION_BATCH_SIZE,
+      )} batch(es), ${skippedAiCandidateCount} deferred.`,
+    );
 
-    for (let index = 0; index < aiCandidates.length; index += 20) {
-      const batch = aiCandidates.slice(index, index + 20);
+    for (let index = 0; index < aiCandidates.length; index += AI_CLASSIFICATION_BATCH_SIZE) {
+      const batch = aiCandidates.slice(index, index + AI_CLASSIFICATION_BATCH_SIZE);
       const result = await classifyBoqItemsWithAi(
         batch.map((candidate) => ({
           currentCategory: candidate.row.subcategory,
@@ -1395,6 +1453,10 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
           aiClassifiedCount += 1;
         }
       }
+    }
+
+    if (skippedAiCandidateCount > 0) {
+      aiError ||= `${skippedAiCandidateCount} low-confidence items were deferred to keep this run fast. Run classification again to continue.`;
     }
   } else {
     aiError = "AI unavailable: OPENAI_API_KEY is not configured. Local fallback used.";
