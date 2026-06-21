@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import * as XLSX from "xlsx";
+import { classifyBoqItemsWithAi, isAiClassificationConfigured } from "@/lib/ai-classifier";
 import { classifyBoqSystem, normalizeTakeoffUnit } from "@/lib/classification";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { DocumentType } from "@/lib/data";
@@ -1283,9 +1284,69 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
   }
 
   const learnedClassifications = await getLearnedClassifications(supabase, user.id);
-  const classifications = rows.map(
-    (row) => findLearnedClassification(row.description, learnedClassifications) || classifyBoqSystem(row.description, row.category, row.subcategory),
-  );
+  const classificationSources = rows.map((row) => {
+    const learnedClassification = findLearnedClassification(row.description, learnedClassifications);
+
+    return {
+      classification: learnedClassification || classifyBoqSystem(row.description, row.category, row.subcategory),
+      source: learnedClassification ? "learned" : "rules",
+    };
+  });
+  const classifications = classificationSources.map((classificationSource) => classificationSource.classification);
+  let aiClassifiedCount = 0;
+  let aiError: string | null = null;
+
+  if (isAiClassificationConfigured()) {
+    const aiCandidates = rows
+      .map((row, index) => ({ classification: classifications[index], index, row, source: classificationSources[index].source }))
+      .filter(
+        (candidate) =>
+          candidate.source !== "learned" &&
+          (candidate.classification.systemName === "Needs Review" || candidate.classification.confidenceScore < 0.86),
+      );
+
+    for (let index = 0; index < aiCandidates.length; index += 40) {
+      const batch = aiCandidates.slice(index, index + 40);
+      const result = await classifyBoqItemsWithAi(
+        batch.map((candidate) => ({
+          amount: candidate.row.amount,
+          currentCategory: candidate.row.subcategory,
+          currentSystem: candidate.row.category,
+          description: candidate.row.description,
+          id: candidate.row.id,
+          quantity: candidate.row.quantity,
+          unit: candidate.row.unit,
+        })),
+      );
+
+      if (result.error) {
+        aiError ||= result.error;
+        console.error(result.error);
+        continue;
+      }
+
+      for (const candidate of batch) {
+        const aiClassification = result.classifications.get(candidate.row.id);
+
+        if (!aiClassification) {
+          continue;
+        }
+
+        const currentClassification = classifications[candidate.index];
+        const aiIsUseful =
+          aiClassification.systemName !== "Needs Review" ||
+          currentClassification.systemName === "Needs Review" ||
+          aiClassification.confidenceScore > currentClassification.confidenceScore;
+
+        if (aiIsUseful) {
+          classifications[candidate.index] = aiClassification;
+          aiClassifiedCount += 1;
+        }
+      }
+    }
+  } else {
+    aiError = "OPENAI_API_KEY is not configured. Used local learning and rule-based classification only.";
+  }
   const { categoryIdsByKey, systemIdsByName } = await getSystemReferenceMaps({
     classifications,
     projectId,
@@ -1347,8 +1408,8 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
     ok: true,
     message:
       updatedCount === rows.length
-        ? `Classified ${updatedCount} BOQ items into systems.`
-        : `Classified ${updatedCount} of ${rows.length} BOQ items. ${firstError || ""}`.trim(),
+        ? `Classified ${updatedCount} BOQ items into systems.${aiClassifiedCount > 0 ? ` AI classified ${aiClassifiedCount} items.` : ""}${aiError ? ` ${aiError}` : ""}`
+        : `Classified ${updatedCount} of ${rows.length} BOQ items. ${firstError || ""} ${aiError || ""}`.trim(),
   } satisfies ProjectDocumentActionResult;
 }
 
