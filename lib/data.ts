@@ -454,7 +454,7 @@ function chooseDisplayBoqRows(rows: BoqItemRow[], validFileIds: Set<string>) {
   const unlinkedRows = rows.filter((row) => !(row.source_file_id || row.project_file_id));
   const displayRows = [...linkedRows, ...unlinkedRows];
 
-  if (linkedRows.length >= 100 || linkedRows.length / rows.length >= 0.5) {
+  if (linkedRows.length / rows.length >= 0.5) {
     if (unlinkedRows.length > 0) {
       console.info(
         `[boq-display] using file-linked BOQ rows and ignoring stale unlinked rows. linked=${linkedRows.length} unlinked=${unlinkedRows.length} rows=${rows.length}`,
