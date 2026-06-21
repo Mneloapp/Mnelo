@@ -52,6 +52,9 @@ export default async function ProjectDetailsPage({
   const parsedFileIds = Array.from(
     new Set(boqItems.map((item) => item.sourceFileId).filter((fileId): fileId is string => Boolean(fileId))),
   );
+  if (parsedFileIds.length === 0 && boqItems.length > 0 && files.length === 1) {
+    parsedFileIds.push(files[0].id);
+  }
   const lastUpload = files[0]?.uploadedAt || "No uploads";
   const itemBoqRows = boqItems.filter((item) => item.rowType === "item");
   const lastParse = boqItems[boqItems.length - 1]?.createdAt || "No parsed BOQ";

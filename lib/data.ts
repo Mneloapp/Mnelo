@@ -445,6 +445,20 @@ function filterBoqRowsForExistingFiles(rows: BoqItemRow[], validFileIds: Set<str
   });
 }
 
+function chooseDisplayBoqRows(rows: BoqItemRow[], validFileIds: Set<string>) {
+  const linkedRows = filterBoqRowsForExistingFiles(rows, validFileIds);
+
+  if (linkedRows.length > 0 || rows.length === 0) {
+    return linkedRows;
+  }
+
+  console.info(
+    `[boq-display] falling back to project-level BOQ rows because no rows are linked to current project files. rows=${rows.length}`,
+  );
+
+  return rows;
+}
+
 function isEmptyNumericValue(value?: number | null) {
   return value === null || value === undefined || Number(value || 0) === 0;
 }
@@ -959,7 +973,7 @@ export async function getBoqItemsForCurrentUser(projectId: string) {
 
   const projectFiles = (filesResult.data || []) as ProjectFileRow[];
   const validFileIds = new Set(projectFiles.map((file) => file.id));
-  let rows = filterBoqRowsForExistingFiles((boqResult.data || []) as BoqItemRow[], validFileIds);
+  let rows = chooseDisplayBoqRows((boqResult.data || []) as BoqItemRow[], validFileIds);
 
   if (rowsNeedStorageContextRepair(rows)) {
     rows = applyStorageExcelContext(rows, await buildStorageExcelContextMap({ files: projectFiles, supabase }));
@@ -1011,7 +1025,7 @@ export async function getProjectSystemsForCurrentUser(projectId: string) {
 
   const projectFiles = (filesResult.data || []) as ProjectFileRow[];
   const validFileIds = new Set(projectFiles.map((file) => file.id));
-  let rows = filterBoqRowsForExistingFiles((boqResult.data || []) as BoqItemRow[], validFileIds);
+  let rows = chooseDisplayBoqRows((boqResult.data || []) as BoqItemRow[], validFileIds);
 
   if (rowsNeedStorageContextRepair(rows)) {
     rows = applyStorageExcelContext(rows, await buildStorageExcelContextMap({ files: projectFiles, supabase }));
