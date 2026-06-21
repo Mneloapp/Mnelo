@@ -1597,7 +1597,9 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
         }
 
         const currentClassification = classifications[candidate.index];
+        const aiReturnedClassification = aiClassification.source === "ai";
         const aiIsUseful =
+          aiReturnedClassification &&
           currentClassification.source !== "learned" &&
           (currentClassification.confidenceScore < 0.7 ||
             currentClassification.systemName === NEEDS_REVIEW_SYSTEM ||
