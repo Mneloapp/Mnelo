@@ -43,7 +43,7 @@ export default async function ProjectDetailsPage({
   ]);
   const { project, errorMessage } = projectResult;
   const { files, errorMessage: filesErrorMessage } = fileResult;
-  const { items: boqItems, errorMessage: boqErrorMessage } = boqResult;
+  const { cleanupSummary, items: boqItems, errorMessage: boqErrorMessage } = boqResult;
   const { records: learningRecords, errorMessage: learningErrorMessage } = learningResult;
   const { systems, errorMessage: systemsErrorMessage } = systemsResult;
   const showFilesError = process.env.NODE_ENV === "development" && filesErrorMessage;
@@ -53,6 +53,7 @@ export default async function ProjectDetailsPage({
     new Set(boqItems.map((item) => item.sourceFileId).filter((fileId): fileId is string => Boolean(fileId))),
   );
   const lastUpload = files[0]?.uploadedAt || "No uploads";
+  const itemBoqRows = boqItems.filter((item) => item.rowType === "item");
   const lastParse = boqItems[boqItems.length - 1]?.createdAt || "No parsed BOQ";
 
   if (!project) {
@@ -133,7 +134,7 @@ export default async function ProjectDetailsPage({
         <section className="mt-6 scroll-mt-24" id="overview">
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <OverviewCard detail="Uploaded project documents" label="Files count" value={String(files.length)} />
-            <OverviewCard detail="Parsed line items" label="BOQ items count" value={String(boqItems.length)} />
+            <OverviewCard detail="Clean item rows after BOQ cleanup" label="BOQ items count" value={String(cleanupSummary.itemRows)} />
             <OverviewCard detail="Most recent document upload" label="Last upload" value={lastUpload} />
             <OverviewCard detail="Latest parsed BOQ row" label="Last parse" value={lastParse} />
           </div>
@@ -175,9 +176,9 @@ export default async function ProjectDetailsPage({
                   View BOQ
                 </a>
               </div>
-              {boqItems.length > 0 ? (
+              {itemBoqRows.length > 0 ? (
                 <div className="mt-4 divide-y divide-[#edf0ed]">
-                  {boqItems.slice(0, 4).map((item) => (
+                  {itemBoqRows.slice(0, 4).map((item) => (
                     <div className="grid gap-2 py-3 sm:grid-cols-[1fr_auto]" key={item.id}>
                       <p className="line-clamp-2 text-sm font-semibold text-[#0f172a]">{item.description}</p>
                       <p className="whitespace-nowrap text-sm text-[#64748b]">
@@ -226,7 +227,12 @@ export default async function ProjectDetailsPage({
         </section>
 
         <section className="mt-6 scroll-mt-24" id="boq">
-          <BoqResultsTable items={boqItems} learningRecords={learningRecords} showClassification={false} />
+          <BoqResultsTable
+            cleanupSummary={cleanupSummary}
+            items={boqItems}
+            learningRecords={learningRecords}
+            showClassification={false}
+          />
           {showBoqError ? (
             <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 font-mono text-xs text-red-800">
               {boqErrorMessage || learningErrorMessage || systemsErrorMessage}

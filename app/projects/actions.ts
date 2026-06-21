@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import * as XLSX from "xlsx";
 import { classifyBoqItemsWithAi, isAiClassificationConfigured } from "@/lib/ai-classifier";
+import { cleanupBoqRow, type BoqRowType } from "@/lib/boq-cleanup";
 import {
   classifyBoqSystem,
   NEEDS_REVIEW_SYSTEM,
@@ -54,6 +55,8 @@ type ParsedBoqRow = {
   unit: string | null;
   rate: number | null;
   amount: number | null;
+  cleanup_reason?: string;
+  row_type?: BoqRowType;
   sheet_name: string;
   row_number: number;
 };
@@ -100,6 +103,7 @@ type BoqClassificationRow = {
   classification_reason?: string | null;
   classification_source?: ClassificationSource | null;
   needs_review?: boolean | null;
+  row_type?: BoqRowType | null;
 };
 
 type LearnedClassification = {
@@ -240,6 +244,24 @@ function predictClassification(description: string): ClassificationPrediction {
     predicted_supplier_type: classification.supplierType,
     confidence_score: classification.confidenceScore,
   };
+}
+
+function normalizeParsedBoqRows(rows: ParsedBoqRow[]) {
+  return rows.map((row) => {
+    const cleanup = cleanupBoqRow({
+      amount: row.amount,
+      description: row.description,
+      quantity: row.quantity,
+      rate: row.rate,
+      unit: row.unit,
+    });
+
+    return {
+      ...row,
+      cleanup_reason: cleanup.reason,
+      row_type: cleanup.rowType,
+    } satisfies ParsedBoqRow;
+  });
 }
 
 function descriptionTokens(description: string) {
@@ -614,9 +636,22 @@ async function saveParsedBoqRows({
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
   userId: string;
 }) {
+  const normalizedRows = normalizeParsedBoqRows(rows);
   const buildBoqRows = ({ fileColumns, optionalColumns }: BoqInsertMode) =>
-    rows.map((row) => {
-      const prediction = predictClassification(row.description);
+    normalizedRows.map((row) => {
+      const rowType = row.row_type || "item";
+      const prediction =
+        rowType === "item"
+          ? predictClassification(row.description)
+          : ({
+              classification_reason: row.cleanup_reason || "Cleanup marked this row as non-item.",
+              classification_source: "needs_review",
+              confidence_score: 0,
+              needs_review: false,
+              predicted_category: "Ignored",
+              predicted_subcategory: rowType,
+              predicted_supplier_type: "Not applicable",
+            } satisfies ClassificationPrediction);
       const payload: Record<string, unknown> = {
         project_id: projectId,
         user_id: userId,
@@ -636,7 +671,9 @@ async function saveParsedBoqRows({
         payload.classification_reason = prediction.classification_reason;
         payload.classification_source = prediction.classification_source;
         payload.classification_status = prediction.needs_review ? "needs_review" : "classified";
+        payload.cleanup_reason = row.cleanup_reason;
         payload.needs_review = prediction.needs_review;
+        payload.row_type = rowType;
       }
 
       if (fileColumns === "both" || fileColumns === "project_file_id") {
@@ -680,7 +717,9 @@ async function saveParsedBoqRows({
       boqError.message.includes("classification_reason") ||
       boqError.message.includes("classification_source") ||
       boqError.message.includes("classification_status") ||
+      boqError.message.includes("cleanup_reason") ||
       boqError.message.includes("needs_review") ||
+      boqError.message.includes("row_type") ||
       boqError.message.includes("confidence_score");
 
     if (!canRetrySchemaFallback) {
@@ -692,8 +731,14 @@ async function saveParsedBoqRows({
     return boqInsertError;
   }
 
+  const itemRows = normalizedRows.filter((row) => row.row_type === "item");
+
+  if (itemRows.length === 0) {
+    return null;
+  }
+
   const { error: learningError } = await supabase.from("ai_training_data").insert(
-    rows.map((row) => {
+    itemRows.map((row) => {
       const prediction = predictClassification(row.description);
 
       return {
@@ -1304,16 +1349,18 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
   const boqResult = await supabase
     .from("boq_items")
     .select(
-      "id, description, quantity, unit, amount, category, subcategory, classification_confidence, classification_reason, classification_source, needs_review",
+      "id, description, quantity, unit, amount, category, subcategory, classification_confidence, classification_reason, classification_source, needs_review, row_type",
     )
     .eq("project_id", projectId)
-    .eq("user_id", user.id);
+    .eq("user_id", user.id)
+    .eq("row_type", "item");
   let data: unknown[] | null = boqResult.data;
   let error = boqResult.error;
 
   if (
     error &&
     (error.message.includes("schema cache") ||
+      error.message.includes("row_type") ||
       error.message.includes("amount") ||
       error.message.includes("category") ||
       error.message.includes("subcategory") ||
@@ -1322,11 +1369,19 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
       error.message.includes("classification_source") ||
       error.message.includes("needs_review"))
   ) {
+    if (error.message.includes("row_type")) {
+      return {
+        ok: false,
+        error: "BOQ cleanup migration is required before classification can run.",
+      } satisfies ProjectDocumentActionResult;
+    }
+
     const fallbackResult = await supabase
       .from("boq_items")
-      .select("id, description, quantity, unit")
+      .select("id, description, quantity, unit, row_type")
       .eq("project_id", projectId)
-      .eq("user_id", user.id);
+      .eq("user_id", user.id)
+      .eq("row_type", "item");
 
     data = fallbackResult.data;
     error = fallbackResult.error;
@@ -1336,10 +1391,13 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
     return { ok: false, error: error.message } satisfies ProjectDocumentActionResult;
   }
 
-  const rows = (data || []) as BoqClassificationRow[];
+  const rows = ((data || []) as BoqClassificationRow[]).filter((row) => !row.row_type || row.row_type === "item");
 
   if (rows.length === 0) {
-    return { ok: false, error: "No BOQ items found. Upload or parse a BOQ file first." } satisfies ProjectDocumentActionResult;
+    return {
+      ok: false,
+      error: "No item rows found. BOQ cleanup marked all parsed rows as headers, totals, notes, or ignored.",
+    } satisfies ProjectDocumentActionResult;
   }
 
   const learnedClassifications = await getLearnedClassifications(supabase, user.id);

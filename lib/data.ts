@@ -1,4 +1,5 @@
 import { classifyBoqSystem, NEEDS_REVIEW_SYSTEM, normalizeTakeoffUnit } from "@/lib/classification";
+import type { BoqRowType } from "@/lib/boq-cleanup";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export type ProjectStatus = "Draft" | "Estimating" | "Procurement" | "Awarded";
@@ -19,6 +20,8 @@ export type BoqItem = {
   classificationReason: string | null;
   classificationSource: "ai" | "learned" | "needs_review" | "rules";
   needsReview: boolean;
+  cleanupReason: string | null;
+  rowType: BoqRowType;
   sheetName: string;
   rowNumber: number;
   createdAt: string;
@@ -107,7 +110,9 @@ export type BoqItemRow = {
   confidence_score?: number | null;
   classification_reason?: string | null;
   classification_source?: string | null;
+  cleanup_reason?: string | null;
   needs_review?: boolean | null;
+  row_type?: string | null;
   takeoff_quantity?: number | null;
   takeoff_unit?: string | null;
   sheet_name: string;
@@ -132,7 +137,14 @@ export type ProjectFilesQueryResult = {
 
 export type BoqItemsQueryResult = {
   items: BoqItem[];
+  cleanupSummary: BoqCleanupSummary;
   errorMessage: string | null;
+};
+
+export type BoqCleanupSummary = {
+  ignoredRows: number;
+  itemRows: number;
+  parsedRows: number;
 };
 
 export type ProjectSystemCategory = {
@@ -335,6 +347,14 @@ export function mapProjectFile(row: ProjectFileRow): ProjectFile {
 }
 
 export function mapBoqItem(row: BoqItemRow): BoqItem {
+  const rowType =
+    row.row_type === "header" ||
+    row.row_type === "subtotal" ||
+    row.row_type === "total" ||
+    row.row_type === "note" ||
+    row.row_type === "ignored"
+      ? row.row_type
+      : "item";
   const classificationSource =
     row.classification_source === "ai" ||
     row.classification_source === "learned" ||
@@ -359,11 +379,24 @@ export function mapBoqItem(row: BoqItemRow): BoqItem {
     confidenceScore: Number(row.confidence_score || 0),
     classificationReason: row.classification_reason || null,
     classificationSource,
+    cleanupReason: row.cleanup_reason || null,
     needsReview: Boolean(row.needs_review) || classificationSource === "needs_review" || row.category === NEEDS_REVIEW_SYSTEM,
+    rowType,
     sheetName: row.sheet_name,
     rowNumber: row.row_number,
     createdAt: formatDate(row.created_at),
   };
+}
+
+function getBoqCleanupSummary(items: BoqItem[]) {
+  const parsedRows = items.length;
+  const itemRows = items.filter((item) => item.rowType === "item").length;
+
+  return {
+    ignoredRows: parsedRows - itemRows,
+    itemRows,
+    parsedRows,
+  } satisfies BoqCleanupSummary;
 }
 
 export function mapLearningRecord(row: LearningRecordRow): LearningRecord {
@@ -452,7 +485,7 @@ export async function getDashboardForCurrentUser() {
   const [projectsResult, filesResult, boqResult] = await Promise.all([
     supabase.from("projects").select("*").eq("user_id", userId).order("updated_at", { ascending: false }),
     supabase.from("project_files").select("*").eq("user_id", userId).order("uploaded_at", { ascending: false }),
-    supabase.from("boq_items").select("id, project_id").eq("user_id", userId),
+    supabase.from("boq_items").select("id, project_id, row_type").eq("user_id", userId),
   ]);
 
   if (projectsResult.error) {
@@ -472,7 +505,11 @@ export async function getDashboardForCurrentUser() {
   const projectRows = (projectsResult.data || []) as ProjectRow[];
   const projects = projectRows.map(mapProject);
   const files = filesResult.error ? [] : ((filesResult.data || []) as ProjectFileRow[]);
-  const boqItems = boqResult.error ? [] : (((boqResult.data || []) as Array<{ id: string; project_id: string }>));
+  const boqItems = boqResult.error
+    ? []
+    : ((boqResult.data || []) as Array<{ id: string; project_id: string; row_type?: string | null }>).filter(
+        (item) => !item.row_type || item.row_type === "item",
+      );
   const projectNames = new Map(projects.map((project) => [project.id, project.name]));
   const fileCounts = new Map<string, number>();
   const boqCounts = new Map<string, number>();
@@ -622,6 +659,7 @@ export async function getBoqItemsForCurrentUser(projectId: string) {
   if (!userId) {
     return {
       items: [],
+      cleanupSummary: { ignoredRows: 0, itemRows: 0, parsedRows: 0 },
       errorMessage: null,
     } satisfies BoqItemsQueryResult;
   }
@@ -639,12 +677,16 @@ export async function getBoqItemsForCurrentUser(projectId: string) {
   if (error) {
     return {
       items: [],
+      cleanupSummary: { ignoredRows: 0, itemRows: 0, parsedRows: 0 },
       errorMessage: error.message,
     } satisfies BoqItemsQueryResult;
   }
 
+  const items = (data as BoqItemRow[]).map(mapBoqItem);
+
   return {
-    items: (data as BoqItemRow[]).map(mapBoqItem),
+    cleanupSummary: getBoqCleanupSummary(items),
+    items,
     errorMessage: null,
   } satisfies BoqItemsQueryResult;
 }
@@ -693,6 +735,10 @@ export async function getProjectSystemsForCurrentUser(projectId: string) {
   >();
 
   for (const row of (data || []) as BoqItemRow[]) {
+    if (row.row_type && row.row_type !== "item") {
+      continue;
+    }
+
     const item = mapBoqItem(row);
     const classification = classifyBoqSystem(item.description, item.category, item.subcategory);
     const systemName = item.category && item.category !== "General" ? item.category : classification.systemName;
@@ -802,7 +848,7 @@ export async function getBoqItemsAcrossCurrentUser() {
   );
 
   return {
-    items: ((boqResult.data || []) as BoqItemRow[]).map((row) => {
+    items: ((boqResult.data || []) as BoqItemRow[]).filter((row) => !row.row_type || row.row_type === "item").map((row) => {
       const item = mapBoqItem(row);
       const sourceFileId = row.source_file_id || row.project_file_id || "";
 

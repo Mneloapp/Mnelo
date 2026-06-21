@@ -1,5 +1,8 @@
+"use client";
+
+import { useMemo, useState } from "react";
 import { correctBoqClassification } from "@/app/projects/actions";
-import { BoqItem, LearningRecord } from "@/lib/data";
+import { BoqCleanupSummary, BoqItem, LearningRecord } from "@/lib/data";
 import { Badge } from "@/components/ui";
 
 const categoryOptions = [
@@ -23,13 +26,26 @@ function learningKey(sourceFileId: string | null, description: string) {
 export function BoqResultsTable({
   items,
   learningRecords = [],
+  cleanupSummary,
   showClassification = true,
 }: {
   items: BoqItem[];
   learningRecords?: LearningRecord[];
+  cleanupSummary?: BoqCleanupSummary;
   showClassification?: boolean;
 }) {
+  const [showIgnoredRows, setShowIgnoredRows] = useState(false);
   const latestLearningByItem = new Map<string, LearningRecord>();
+  const summary =
+    cleanupSummary || ({
+      ignoredRows: items.filter((item) => item.rowType !== "item").length,
+      itemRows: items.filter((item) => item.rowType === "item").length,
+      parsedRows: items.length,
+    } satisfies BoqCleanupSummary);
+  const visibleItems = useMemo(
+    () => (showIgnoredRows ? items : items.filter((item) => item.rowType === "item")),
+    [items, showIgnoredRows],
+  );
 
   for (const record of learningRecords) {
     const key = learningKey(record.sourceFileId, record.itemDescription);
@@ -41,12 +57,28 @@ export function BoqResultsTable({
       <div className="flex flex-col gap-3 border-b border-line px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-lg font-semibold tracking-tight text-ink">BOQ Results</h2>
-          <p className="text-sm text-ink/55">Parsed rows from uploaded Excel BOQ workbooks.</p>
+          <p className="text-sm text-ink/55">
+            {summary.parsedRows.toLocaleString()} parsed rows / {summary.itemRows.toLocaleString()} item rows /{" "}
+            {summary.ignoredRows.toLocaleString()} ignored rows
+          </p>
         </div>
-        <Badge tone={items.length > 0 ? "green" : "neutral"}>{items.length} parsed rows</Badge>
+        <div className="flex flex-wrap items-center gap-3">
+          {summary.ignoredRows > 0 ? (
+            <label className="inline-flex items-center gap-2 text-xs font-semibold text-ink/55">
+              <input
+                checked={showIgnoredRows}
+                className="h-4 w-4 rounded border-line text-leaf-600 focus:ring-leaf-500"
+                onChange={(event) => setShowIgnoredRows(event.currentTarget.checked)}
+                type="checkbox"
+              />
+              Show ignored rows
+            </label>
+          ) : null}
+          <Badge tone={summary.itemRows > 0 ? "green" : "neutral"}>{summary.itemRows} item rows</Badge>
+        </div>
       </div>
 
-      {items.length > 0 ? (
+      {visibleItems.length > 0 ? (
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-line text-left text-sm">
             <thead className="bg-mist/70 text-xs uppercase tracking-wide text-ink/45">
@@ -56,6 +88,7 @@ export function BoqResultsTable({
                 <th className="px-5 py-3 font-semibold">Unit</th>
                 <th className="px-5 py-3 text-right font-semibold">Rate</th>
                 <th className="px-5 py-3 text-right font-semibold">Amount</th>
+                <th className="px-5 py-3 font-semibold">Row type</th>
                 {showClassification ? (
                   <>
                     <th className="px-5 py-3 font-semibold">Sheet</th>
@@ -67,7 +100,7 @@ export function BoqResultsTable({
               </tr>
             </thead>
             <tbody className="divide-y divide-line bg-white">
-              {items.map((item) => {
+              {visibleItems.map((item) => {
                 const learningRecord = latestLearningByItem.get(learningKey(item.sourceFileId, item.description));
                 const predictedCategory = learningRecord?.predictedCategory || item.category;
                 const predictedSubcategory = learningRecord?.predictedSubcategory || item.subcategory;
@@ -91,6 +124,12 @@ export function BoqResultsTable({
                     </td>
                     <td className="whitespace-nowrap px-5 py-4 text-right text-ink/60">
                       {item.amount === null ? "—" : item.amount.toLocaleString()}
+                    </td>
+                    <td className="whitespace-nowrap px-5 py-4">
+                      <Badge tone={item.rowType === "item" ? "green" : "neutral"}>{item.rowType}</Badge>
+                      {item.rowType !== "item" && item.cleanupReason ? (
+                        <p className="mt-1 max-w-48 text-xs text-ink/40">{item.cleanupReason}</p>
+                      ) : null}
                     </td>
                     {showClassification ? (
                       <>
@@ -154,9 +193,11 @@ export function BoqResultsTable({
         </div>
       ) : (
         <div className="p-8 text-center">
-          <p className="font-medium text-ink">No BOQ items parsed yet</p>
+          <p className="font-medium text-ink">
+            {items.length > 0 ? "Only ignored BOQ rows are hidden" : "No BOQ items parsed yet"}
+          </p>
           <p className="mt-2 text-sm text-ink/55">
-            Upload or parse a BOQ file to get started.
+            {items.length > 0 ? "Turn on Show ignored rows to inspect cleanup output." : "Upload or parse a BOQ file to get started."}
           </p>
         </div>
       )}
