@@ -11,6 +11,7 @@ import {
 } from "@/app/projects/actions";
 import type { ProjectDocumentActionResult } from "@/app/projects/actions";
 import type { GlobalProjectFile } from "@/lib/data";
+import { ParserDebugSummary } from "@/components/parser-debug-summary";
 import { EmptyState, ErrorMessage } from "@/components/ui";
 
 type MappingRequest = {
@@ -22,7 +23,11 @@ type MappingRequest = {
 export function FilesTable({ files }: { files: GlobalProjectFile[] }) {
   const router = useRouter();
   const [visibleFiles, setVisibleFiles] = useState(files);
-  const [notice, setNotice] = useState<{ tone: "success" | "error"; message: string } | null>(null);
+  const [notice, setNotice] = useState<{
+    tone: "success" | "error";
+    message: string;
+    parserSummary?: ProjectDocumentActionResult["parserSummary"];
+  } | null>(null);
   const [mappingRequest, setMappingRequest] = useState<MappingRequest | null>(null);
   const [deletingFileId, setDeletingFileId] = useState<string | null>(null);
   const [parsingFileId, setParsingFileId] = useState<string | null>(null);
@@ -36,7 +41,7 @@ export function FilesTable({ files }: { files: GlobalProjectFile[] }) {
       return false;
     }
 
-    setNotice({ tone: "success", message: result.message || successFallback });
+    setNotice({ tone: "success", message: result.message || successFallback, parserSummary: result.parserSummary });
     router.refresh();
     return true;
   }
@@ -49,7 +54,8 @@ export function FilesTable({ files }: { files: GlobalProjectFile[] }) {
             <ErrorMessage message={notice.message} />
           ) : (
             <div className="rounded-xl border border-[#bbf7d0] bg-[#ecfdf3] px-4 py-3 text-sm text-[#087a36]">
-              {notice.message}
+              <div>{notice.message}</div>
+              <ParserDebugSummary summary={notice.parserSummary} />
             </div>
           )}
         </div>

@@ -1,3 +1,4 @@
+import { getBuildInfo } from "@/lib/build-info";
 import { createSupabaseClient, hasSupabaseConfig, supabaseEnvStatus } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
@@ -40,6 +41,7 @@ async function checkSupabaseConnection() {
 
 export default async function HealthPage() {
   const { isConnected, errorMessage } = await checkSupabaseConnection();
+  const buildInfo = getBuildInfo();
   const envRows = [
     ["NEXT_PUBLIC_SUPABASE_URL", supabaseEnvStatus.hasUrl],
     ["NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", supabaseEnvStatus.hasPublishableKey],
@@ -85,6 +87,24 @@ export default async function HealthPage() {
             <p className="mt-2 break-words font-mono text-sm text-red-900">{errorMessage}</p>
           </div>
         ) : null}
+
+        <div className="mt-5 rounded-lg border border-line bg-mist px-4 py-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-ink/45">Build</p>
+          <dl className="mt-2 grid gap-2 text-xs">
+            <div className="flex items-center justify-between gap-4">
+              <dt className="text-ink/55">Commit</dt>
+              <dd className="break-all font-mono text-ink">{buildInfo.commit}</dd>
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <dt className="text-ink/55">Branch</dt>
+              <dd className="font-mono text-ink">{buildInfo.branch}</dd>
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <dt className="text-ink/55">Environment</dt>
+              <dd className="font-mono text-ink">{buildInfo.environment}</dd>
+            </div>
+          </dl>
+        </div>
       </section>
     </main>
   );

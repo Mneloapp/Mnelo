@@ -11,10 +11,12 @@ import {
 } from "@/app/projects/actions";
 import type { ProjectDocumentActionResult } from "@/app/projects/actions";
 import type { ProjectFile } from "@/lib/data";
+import { ParserDebugSummary } from "@/components/parser-debug-summary";
 
 type Notice = {
   tone: "success" | "error";
   message: string;
+  parserSummary?: ProjectDocumentActionResult["parserSummary"];
 };
 
 type MappingRequest = {
@@ -63,7 +65,7 @@ export function ProjectDocumentsPanel({
       return false;
     }
 
-    setNotice({ tone: "success", message: result.message || successFallback });
+    setNotice({ tone: "success", message: result.message || successFallback, parserSummary: result.parserSummary });
     router.refresh();
     return true;
   }
@@ -79,7 +81,8 @@ export function ProjectDocumentsPanel({
           }
           role="status"
         >
-          {notice.message}
+          <div>{notice.message}</div>
+          {notice.tone === "success" ? <ParserDebugSummary summary={notice.parserSummary} /> : null}
         </div>
       ) : null}
 
