@@ -446,9 +446,33 @@ function filterBoqRowsForExistingFiles(rows: BoqItemRow[], validFileIds: Set<str
 }
 
 function chooseDisplayBoqRows(rows: BoqItemRow[], validFileIds: Set<string>) {
-  const linkedRows = filterBoqRowsForExistingFiles(rows, validFileIds);
+  if (rows.length === 0) {
+    return [];
+  }
 
-  if (linkedRows.length > 0 || rows.length === 0) {
+  const linkedRows = filterBoqRowsForExistingFiles(rows, validFileIds);
+  const unlinkedRows = rows.filter((row) => !(row.source_file_id || row.project_file_id));
+  const displayRows = [...linkedRows, ...unlinkedRows];
+
+  if (linkedRows.length > 0 && linkedRows.length / rows.length < 0.75) {
+    console.info(
+      `[boq-display] linked BOQ rows are a small subset of project rows. Using project-level rows to avoid hiding the latest parse. linked=${linkedRows.length} rows=${rows.length}`,
+    );
+
+    return rows;
+  }
+
+  if (displayRows.length > 0) {
+    if (unlinkedRows.length > 0) {
+      console.info(
+        `[boq-display] including unlinked project-level BOQ rows with linked rows. linked=${linkedRows.length} unlinked=${unlinkedRows.length}`,
+      );
+    }
+
+    return displayRows;
+  }
+
+  if (linkedRows.length > 0) {
     return linkedRows;
   }
 

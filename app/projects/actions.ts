@@ -73,7 +73,14 @@ type ClassificationPrediction = {
 
 type BoqInsertMode = {
   fileColumns: "both" | "project_file_id" | "source_file_id";
-  optionalColumns: "basicClassification" | "full" | "legacy" | "withoutConfidence";
+  optionalColumns:
+    | "basicClassification"
+    | "contextOnly"
+    | "full"
+    | "legacy"
+    | "withoutClassificationMeta"
+    | "withoutClassificationStatus"
+    | "withoutConfidence";
 };
 
 type BoqClassificationRow = {
@@ -392,8 +399,17 @@ async function saveParsedBoqRows({
   const parserSummary = getBoqParserSummary(normalizedRows);
   logBoqParserDebugSummary(projectId, normalizedRows);
   const buildBoqRows = ({ fileColumns, optionalColumns }: BoqInsertMode) => {
+    const includesContextColumns =
+      optionalColumns === "full" ||
+      optionalColumns === "withoutConfidence" ||
+      optionalColumns === "withoutClassificationStatus" ||
+      optionalColumns === "withoutClassificationMeta" ||
+      optionalColumns === "contextOnly";
+    const includesClassificationMeta =
+      optionalColumns === "full" || optionalColumns === "withoutConfidence" || optionalColumns === "withoutClassificationStatus";
+    const includesNeedsReview = includesClassificationMeta || optionalColumns === "withoutClassificationMeta";
     const rowsForInsert =
-      optionalColumns === "full" || optionalColumns === "withoutConfidence"
+      includesContextColumns
         ? normalizedRows
         : normalizedRows.filter((row) => row.row_type === "item");
 
@@ -433,20 +449,28 @@ async function saveParsedBoqRows({
         payload.confidence_score = prediction.confidence_score;
       }
 
-      if (optionalColumns === "full" || optionalColumns === "withoutConfidence") {
+      if (includesClassificationMeta) {
         payload.classification_subcategory = prediction.predicted_classification_subcategory;
         payload.classification_confidence = prediction.confidence_score;
         payload.classification_reason = prediction.classification_reason;
         payload.classification_source = prediction.classification_source;
-        payload.classification_status = prediction.needs_review ? "needs_review" : "classified";
+        if (optionalColumns !== "withoutClassificationStatus") {
+          payload.classification_status = prediction.needs_review ? "needs_review" : "classified";
+        }
+      }
+
+      if (includesContextColumns) {
         payload.cleanup_reason = row.cleanup_reason;
         payload.inherited_category = row.inherited_category;
         payload.inherited_subcategory = row.inherited_subcategory;
-        payload.needs_review = prediction.needs_review;
         payload.row_type = rowType;
         payload.section_header = row.section_header;
         payload.source_row_number = row.source_row_number || row.row_number;
         payload.source_sheet_name = row.source_sheet_name || row.sheet_name;
+      }
+
+      if (includesNeedsReview) {
+        payload.needs_review = prediction.needs_review;
       }
 
       if (optionalColumns === "withoutConfidence") {
@@ -468,14 +492,23 @@ async function saveParsedBoqRows({
   const insertAttempts: BoqInsertMode[] = [
     { fileColumns: "both", optionalColumns: "full" },
     { fileColumns: "both", optionalColumns: "withoutConfidence" },
+    { fileColumns: "both", optionalColumns: "withoutClassificationStatus" },
+    { fileColumns: "both", optionalColumns: "withoutClassificationMeta" },
+    { fileColumns: "both", optionalColumns: "contextOnly" },
     { fileColumns: "both", optionalColumns: "basicClassification" },
     { fileColumns: "both", optionalColumns: "legacy" },
     { fileColumns: "source_file_id", optionalColumns: "full" },
     { fileColumns: "source_file_id", optionalColumns: "withoutConfidence" },
+    { fileColumns: "source_file_id", optionalColumns: "withoutClassificationStatus" },
+    { fileColumns: "source_file_id", optionalColumns: "withoutClassificationMeta" },
+    { fileColumns: "source_file_id", optionalColumns: "contextOnly" },
     { fileColumns: "source_file_id", optionalColumns: "basicClassification" },
     { fileColumns: "source_file_id", optionalColumns: "legacy" },
     { fileColumns: "project_file_id", optionalColumns: "full" },
     { fileColumns: "project_file_id", optionalColumns: "withoutConfidence" },
+    { fileColumns: "project_file_id", optionalColumns: "withoutClassificationStatus" },
+    { fileColumns: "project_file_id", optionalColumns: "withoutClassificationMeta" },
+    { fileColumns: "project_file_id", optionalColumns: "contextOnly" },
     { fileColumns: "project_file_id", optionalColumns: "basicClassification" },
     { fileColumns: "project_file_id", optionalColumns: "legacy" },
   ];
