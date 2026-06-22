@@ -90,6 +90,7 @@ export function ProjectSystemsPanel({
   const [drafts, setDrafts] = useState<Record<string, DraftChange>>({});
   const [savedOverrides, setSavedOverrides] = useState<Record<string, DraftChange>>({});
   const [notice, setNotice] = useState<{ tone: "success" | "error"; message: string } | null>(null);
+  const [draftNotice, setDraftNotice] = useState<string | null>(null);
   const [systemFilter, setSystemFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [sourceFilter, setSourceFilter] = useState<(typeof sourceOptions)[number]>("all");
@@ -218,6 +219,31 @@ export function ProjectSystemsPanel({
     }));
   }
 
+  function applyPatchToRows(rows: FlatSystemRow[], patch: Partial<DraftChange>) {
+    if (rows.length === 0) {
+      return;
+    }
+
+    setDrafts((previous) => {
+      const next = { ...previous };
+
+      for (const row of rows) {
+        const current = next[row.item.id] || savedOverrides[row.item.id] || draftForItem(row.item, row.system.name, row.category.name);
+        next[row.item.id] = { ...current, ...patch };
+      }
+
+      return next;
+    });
+  }
+
+  function applyPatchToIds(itemIds: Iterable<string>, patch: Partial<DraftChange>) {
+    const rows = Array.from(itemIds)
+      .map((itemId) => originalById.get(itemId))
+      .filter((row): row is FlatSystemRow => Boolean(row));
+
+    applyPatchToRows(rows, patch);
+  }
+
   function setSelected(nextIds: Iterable<string>) {
     setSelectedIds(new Set(nextIds));
   }
@@ -249,9 +275,7 @@ export function ProjectSystemsPanel({
   }
 
   function applyBulkPatch(patch: Partial<DraftChange>) {
-    for (const itemId of selectedIds) {
-      updateDraft(itemId, patch);
-    }
+    applyPatchToIds(selectedIds, patch);
   }
 
   async function downloadSystem(system: ProjectSystemSummary) {
@@ -292,6 +316,7 @@ export function ProjectSystemsPanel({
 
     setIsSaving(true);
     setNotice(null);
+    setDraftNotice(null);
 
     try {
       const formData = new FormData();
@@ -491,6 +516,114 @@ export function ProjectSystemsPanel({
         </div>
       </div>
 
+      <div className="mt-3 rounded-2xl border border-[#bbf7d0] bg-[#ecfdf3] p-4">
+        <div className="grid gap-3 xl:grid-cols-[minmax(16rem,1fr)_11rem_12rem_12rem_auto_auto] xl:items-end">
+          <div>
+            <p className="text-sm font-semibold text-[#07130f]">Bulk classify visible rows</p>
+            <p className="mt-1 text-xs leading-5 text-[#64748b]">
+              Filter or search the BOQ, choose the target system/category/subcategory, then apply it to the visible rows.
+              Nothing is saved until you click Save changes.
+            </p>
+          </div>
+          <label className="grid gap-1 text-xs font-semibold text-[#64748b]">
+            System
+            <select
+              className="h-10 rounded-xl border border-[#bbf7d0] bg-white px-3 text-sm font-medium text-[#0f172a] outline-none focus:border-[#16a34a] focus:ring-4 focus:ring-[#dcfce7]"
+              onChange={(event) => {
+                const nextSystem = event.currentTarget.value;
+                const nextCategory = defaultCategoryForSystem(nextSystem);
+                const nextSubcategory = getDefaultSubcategory(nextSystem, nextCategory);
+                setBulkSystem(nextSystem);
+                setBulkCategory(nextCategory);
+                setBulkSubcategory(nextSubcategory);
+              }}
+              value={bulkSystem}
+            >
+              {systemOptions.map((option) => (
+                <option key={`visible-${option.systemName}`} value={option.systemName}>
+                  {option.systemName}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grid gap-1 text-xs font-semibold text-[#64748b]">
+            Category
+            <select
+              className="h-10 rounded-xl border border-[#bbf7d0] bg-white px-3 text-sm font-medium text-[#0f172a] outline-none focus:border-[#16a34a] focus:ring-4 focus:ring-[#dcfce7]"
+              onChange={(event) => {
+                const nextCategory = event.currentTarget.value;
+                const nextSubcategory = getDefaultSubcategory(bulkSystem, nextCategory);
+                setBulkCategory(nextCategory);
+                setBulkSubcategory(nextSubcategory);
+              }}
+              value={bulkCategory}
+            >
+              {getCategoryOptions(bulkSystem).map((category) => (
+                <option key={`visible-${bulkSystem}-${category}`} value={category}>
+                  {category}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grid gap-1 text-xs font-semibold text-[#64748b]">
+            Subcategory
+            <select
+              className="h-10 rounded-xl border border-[#bbf7d0] bg-white px-3 text-sm font-medium text-[#0f172a] outline-none focus:border-[#16a34a] focus:ring-4 focus:ring-[#dcfce7]"
+              onChange={(event) => setBulkSubcategory(event.currentTarget.value)}
+              value={bulkSubcategory}
+            >
+              {getSubcategoryOptions(bulkSystem, bulkCategory).map((subcategory) => (
+                <option key={`visible-${bulkSystem}-${bulkCategory}-${subcategory}`} value={subcategory}>
+                  {subcategory}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            className="inline-flex h-10 items-center justify-center rounded-xl bg-[#16a34a] px-4 text-sm font-semibold text-white shadow-[0_12px_28px_rgba(22,163,74,0.18)] transition hover:bg-[#087a36] disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={filteredRows.length === 0}
+            onClick={() => {
+              applyPatchToRows(filteredRows, {
+                categoryName: bulkCategory,
+                needsReview: false,
+                subcategoryName: bulkSubcategory,
+                systemName: bulkSystem,
+              });
+              setDraftNotice(
+                `Prepared ${filteredRows.length.toLocaleString()} visible rows. Review the draft changes, then click Save changes.`,
+              );
+            }}
+            type="button"
+          >
+            Apply to {filteredRows.length.toLocaleString()} visible
+          </button>
+          <button
+            className="inline-flex h-10 items-center justify-center rounded-xl bg-white px-4 text-sm font-semibold text-[#087a36] ring-1 ring-[#bbf7d0] transition hover:bg-[#f0fdf4] disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={!filteredRows.some((row) => row.item.needsReview)}
+            onClick={() => {
+              const needsReviewRows = filteredRows.filter((row) => row.item.needsReview);
+              applyPatchToRows(needsReviewRows, {
+                categoryName: bulkCategory,
+                needsReview: false,
+                subcategoryName: bulkSubcategory,
+                systemName: bulkSystem,
+              });
+              setDraftNotice(
+                `Prepared ${needsReviewRows.length.toLocaleString()} visible needs-review rows. Click Save changes to store them.`,
+              );
+            }}
+            type="button"
+          >
+            Apply to Needs Review
+          </button>
+        </div>
+        {draftNotice ? (
+          <p className="mt-3 rounded-xl bg-white px-3 py-2 text-xs font-semibold text-[#087a36] ring-1 ring-[#bbf7d0]">
+            {draftNotice}
+          </p>
+        ) : null}
+      </div>
+
       {selectedCount > 0 || dirtyCount > 0 ? (
         <div className="sticky top-3 z-20 mt-5 rounded-2xl border border-[#bbf7d0] bg-white/95 p-3 shadow-[0_18px_40px_rgba(15,23,42,0.12)] backdrop-blur">
           <div className="grid gap-3 xl:grid-cols-[auto_11rem_12rem_12rem_auto_auto_auto_auto] xl:items-center">
@@ -577,6 +710,7 @@ export function ProjectSystemsPanel({
               onClick={() => {
                 setDrafts({});
                 setSelectedIds(new Set());
+                setDraftNotice(null);
               }}
               type="button"
             >
