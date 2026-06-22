@@ -11,6 +11,7 @@ import {
   getSubcategoryOptions,
   getSystemRuleOptions,
   NEEDS_REVIEW_CATEGORY,
+  NEEDS_REVIEW_SYSTEM,
 } from "@/lib/classification";
 import type { ProjectSystemCategory, ProjectSystemSummary, SystemBoqItem } from "@/lib/data";
 import { EmptyState, ErrorMessage } from "@/components/ui";
@@ -85,6 +86,7 @@ export function ProjectSystemsPanel({
 }) {
   const router = useRouter();
   const [isClassifying, setIsClassifying] = useState(false);
+  const [isConfirming, setIsConfirming] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [drafts, setDrafts] = useState<Record<string, DraftChange>>({});
@@ -349,6 +351,84 @@ export function ProjectSystemsPanel({
     }
   }
 
+  async function confirmRowsAsCorrect(rows: FlatSystemRow[]) {
+    if (rows.length === 0 || isConfirming) {
+      return;
+    }
+
+    const changes = rows
+      .map((row) => {
+        const draft = displayDraft(row);
+
+        return {
+          categoryName: draft.categoryName,
+          itemId: row.item.id,
+          needsReview: false,
+          subcategoryName: draft.subcategoryName,
+          systemName: draft.systemName,
+        };
+      })
+      .filter((change) => change.systemName !== NEEDS_REVIEW_SYSTEM && change.categoryName !== NEEDS_REVIEW_CATEGORY);
+
+    if (changes.length === 0) {
+      setNotice({
+        tone: "error",
+        message: "Choose a real system/category before confirming rows as correct.",
+      });
+      return;
+    }
+
+    setIsConfirming(true);
+    setNotice(null);
+    setDraftNotice(null);
+
+    try {
+      const formData = new FormData();
+      formData.set("project_id", projectId);
+      formData.set("changes", JSON.stringify(changes));
+      const result = await bulkCorrectBoqItemClassifications(formData);
+
+      if (!result.ok) {
+        const message = result.error || "Could not confirm visible rows as correct.";
+        console.error(message);
+        setNotice({ tone: "error", message });
+        return;
+      }
+
+      const confirmedIds = new Set(changes.map((change) => change.itemId));
+      const confirmedOverrides = changes.reduce(
+        (overrides, change) => ({
+          ...overrides,
+          [change.itemId]: {
+            categoryName: change.categoryName,
+            needsReview: false,
+            subcategoryName: change.subcategoryName,
+            systemName: change.systemName,
+          },
+        }),
+        {} as Record<string, DraftChange>,
+      );
+
+      setSavedOverrides((previous) => ({ ...previous, ...confirmedOverrides }));
+      setDrafts((previous) =>
+        Object.fromEntries(Object.entries(previous).filter(([itemId]) => !confirmedIds.has(itemId))),
+      );
+      setSelectedIds((previous) => new Set(Array.from(previous).filter((itemId) => !confirmedIds.has(itemId))));
+      setNotice({
+        tone: "success",
+        message: `Confirmed ${changes.length.toLocaleString()} visible rows as correct and saved them to classification memory.`,
+      });
+    } catch (error) {
+      console.error(error);
+      setNotice({
+        tone: "error",
+        message: error instanceof Error ? error.message : "Unknown classification confirmation error.",
+      });
+    } finally {
+      setIsConfirming(false);
+    }
+  }
+
   function rowMoved(row: FlatSystemRow) {
     const saved = savedOverrides[row.item.id];
 
@@ -517,7 +597,7 @@ export function ProjectSystemsPanel({
       </div>
 
       <div className="mt-3 rounded-2xl border border-[#bbf7d0] bg-[#ecfdf3] p-4">
-        <div className="grid gap-3 xl:grid-cols-[minmax(16rem,1fr)_11rem_12rem_12rem_auto_auto] xl:items-end">
+        <div className="grid gap-3 xl:grid-cols-[minmax(16rem,1fr)_11rem_12rem_12rem_auto_auto_auto] xl:items-end">
           <div>
             <p className="text-sm font-semibold text-[#07130f]">Bulk classify visible rows</p>
             <p className="mt-1 text-xs leading-5 text-[#64748b]">
@@ -615,6 +695,15 @@ export function ProjectSystemsPanel({
             type="button"
           >
             Apply to Needs Review
+          </button>
+          <button
+            className="inline-flex h-10 items-center justify-center rounded-xl bg-white px-4 text-sm font-semibold text-[#0f172a] ring-1 ring-[#bbf7d0] transition hover:bg-[#f0fdf4] disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={filteredRows.length === 0 || isConfirming}
+            onClick={() => void confirmRowsAsCorrect(filteredRows)}
+            type="button"
+          >
+            <Save aria-hidden="true" className="mr-2 h-4 w-4" strokeWidth={2} />
+            {isConfirming ? "Confirming..." : "Confirm visible as correct"}
           </button>
         </div>
         {draftNotice ? (
