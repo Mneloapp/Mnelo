@@ -1903,37 +1903,48 @@ export async function bulkCorrectBoqItemClassifications(formData: FormData) {
 
     const itemIds = Array.from(new Set(changes.map((change) => change.itemId)));
     const changesById = new Map(changes.map((change) => [change.itemId, change]));
-    const rowsResult = await supabase
-      .from("boq_items")
-      .select("id, description, quantity, unit, amount, category, subcategory, classification_subcategory, source_file_id, project_file_id, row_type")
-      .eq("project_id", projectId)
-      .eq("user_id", user.id)
-      .eq("row_type", "item")
-      .in("id", itemIds);
-    let rows = rowsResult.data as unknown[] | null;
-    let rowsError = rowsResult.error;
+    const rowSelects = [
+      "id, description, quantity, unit, amount, category, subcategory, classification_subcategory, source_file_id, project_file_id, row_type",
+      "id, description, quantity, unit, amount, category, subcategory, source_file_id, project_file_id, row_type",
+      "id, description, quantity, unit, amount, category, subcategory, source_file_id, row_type",
+      "id, description, quantity, unit, amount, category, subcategory, row_type",
+      "id, description, quantity, unit, amount, category, subcategory",
+    ];
+    let rows: unknown[] | null = null;
+    let rowsError: { message: string } | null = null;
 
-    if (
-      rowsError &&
-      (rowsError.message.includes("classification_subcategory") || rowsError.message.includes("schema cache"))
-    ) {
-      const fallbackRows = await supabase
+    for (const selectColumns of rowSelects) {
+      const result = await supabase
         .from("boq_items")
-        .select("id, description, quantity, unit, amount, category, subcategory, source_file_id, project_file_id, row_type")
+        .select(selectColumns)
         .eq("project_id", projectId)
         .eq("user_id", user.id)
-        .eq("row_type", "item")
         .in("id", itemIds);
 
-      rows = fallbackRows.data as unknown[] | null;
-      rowsError = fallbackRows.error;
+      if (!result.error) {
+        rows = result.data as unknown[] | null;
+        rowsError = null;
+        break;
+      }
+
+      rowsError = result.error;
+      const canRetrySchemaFallback =
+        result.error.message.includes("schema cache") ||
+        result.error.message.includes("classification_subcategory") ||
+        result.error.message.includes("project_file_id") ||
+        result.error.message.includes("source_file_id") ||
+        result.error.message.includes("row_type");
+
+      if (!canRetrySchemaFallback) {
+        break;
+      }
     }
 
     if (rowsError) {
       return { ok: false, error: rowsError.message } satisfies ProjectDocumentActionResult;
     }
 
-    const itemRows = ((rows || []) as BoqClassificationRow[]).filter((row) => row.row_type === "item");
+    const itemRows = ((rows || []) as BoqClassificationRow[]).filter((row) => !row.row_type || row.row_type === "item");
 
     if (itemRows.length === 0) {
       return { ok: false, error: "No editable BOQ item rows were found." } satisfies ProjectDocumentActionResult;
