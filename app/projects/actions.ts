@@ -249,6 +249,35 @@ function findPreservedManualClassification(
   return maps.strict.get(boqRowStrictFingerprint(fingerprintRow)) || maps.content.get(boqRowContentFingerprint(fingerprintRow)) || null;
 }
 
+function isStrongClassification(classification: SystemClassification | null | undefined) {
+  return Boolean(
+    classification &&
+      classification.systemName !== NEEDS_REVIEW_SYSTEM &&
+      classification.categoryName !== NEEDS_REVIEW_CATEGORY &&
+      classification.subcategoryName &&
+      classification.confidenceScore >= 0.7,
+  );
+}
+
+function needsReviewPrediction({
+  reason,
+  systemName = NEEDS_REVIEW_SYSTEM,
+}: {
+  reason: string;
+  systemName?: string;
+}): ClassificationPrediction {
+  return {
+    classification_reason: reason,
+    classification_source: systemName === NEEDS_REVIEW_SYSTEM ? "needs_review" : "rules",
+    confidence_score: systemName === NEEDS_REVIEW_SYSTEM ? 0.18 : 0.48,
+    needs_review: true,
+    predicted_category: systemName,
+    predicted_classification_subcategory: null,
+    predicted_subcategory: NEEDS_REVIEW_CATEGORY,
+    predicted_supplier_type: "Needs review",
+  };
+}
+
 function predictClassification(
   row: ParsedBoqRow,
   learnedClassifications: LearnedClassification[] = [],
@@ -275,33 +304,48 @@ function predictClassification(
   const learnedClassification = findLearnedClassification(row.description, learnedClassifications);
 
   if (learnedClassification) {
+    const learnedHasSubcategory = Boolean(learnedClassification.subcategoryName);
+
     return {
       classification_reason: learnedClassification.reason || "Matched previous manual correction memory.",
       classification_source: "learned",
-      needs_review: false,
+      needs_review: !learnedHasSubcategory,
       predicted_category: learnedClassification.systemName,
       predicted_subcategory: learnedClassification.categoryName,
       predicted_classification_subcategory: learnedClassification.subcategoryName || null,
       predicted_supplier_type: learnedClassification.supplierType,
-      confidence_score: learnedClassification.confidenceScore,
+      confidence_score: learnedHasSubcategory ? learnedClassification.confidenceScore : Math.min(learnedClassification.confidenceScore, 0.68),
     };
   }
 
   const inheritedClassification = inferClassificationFromExcelContext(row.sheet_name, row.section_header);
-  const classification = inheritedClassification || classifyBoqSystem(row.description);
-  const needsReview =
-    classification.systemName === NEEDS_REVIEW_SYSTEM ||
-    classification.categoryName === NEEDS_REVIEW_CATEGORY ||
-    !classification.subcategoryName ||
-    classification.confidenceScore < 0.7;
+  const inheritedSystemHint =
+    inheritedClassification?.systemName && inheritedClassification.systemName !== NEEDS_REVIEW_SYSTEM
+      ? inheritedClassification.systemName
+      : undefined;
+  const rulesClassification = classifyBoqSystem(row.description, inheritedSystemHint);
+  const classification = isStrongClassification(rulesClassification)
+    ? rulesClassification
+    : isStrongClassification(inheritedClassification)
+      ? inheritedClassification
+      : null;
+
+  if (!classification) {
+    return needsReviewPrediction({
+      reason: inheritedSystemHint
+        ? "System inferred from Excel context, but category and subcategory require review."
+        : "Local classifier could not confidently map this item.",
+      systemName: inheritedSystemHint || rulesClassification.systemName,
+    });
+  }
+
+  const needsReview = false;
 
   return {
     classification_reason:
       classification.reason ||
-      (needsReview
-        ? "Local classifier could not confidently map this item."
-        : "Matched local classification rules."),
-    classification_source: classification.source || (needsReview ? "needs_review" : "rules"),
+      (classification === rulesClassification ? "Matched local classification rules." : "Inherited from Excel context."),
+    classification_source: classification.source || "rules",
     needs_review: needsReview,
     predicted_category: classification.systemName,
     predicted_subcategory: classification.categoryName,
@@ -485,22 +529,33 @@ async function getLearnedClassifications(
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
   userId: string,
 ) {
-  const { data, error } = await supabase
-    .from("ai_training_data")
-    .select("item_description, final_category, final_subcategory, user_corrected_category, user_corrected_subcategory, output")
-    .eq("user_id", userId)
-    .not("user_corrected_category", "is", null)
-    .not("user_corrected_subcategory", "is", null)
-    .not("item_description", "is", null)
-    .order("created_at", { ascending: false })
-    .limit(1000);
+  const selectAttempts = [
+    "item_description, final_category, final_subcategory, final_classification_subcategory, user_corrected_category, user_corrected_subcategory, output",
+    "item_description, final_category, final_subcategory, user_corrected_category, user_corrected_subcategory, output",
+  ];
 
-  if (error) {
-    console.error(`Failed reading learned classifications: ${error.message}`);
-    return [];
+  for (const selectColumns of selectAttempts) {
+    const { data, error } = await supabase
+      .from("ai_training_data")
+      .select(selectColumns)
+      .eq("user_id", userId)
+      .not("user_corrected_category", "is", null)
+      .not("user_corrected_subcategory", "is", null)
+      .not("item_description", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(1000);
+
+    if (!error) {
+      return ((data || []) as unknown) as LearnedClassification[];
+    }
+
+    if (!error.message.includes("final_classification_subcategory") && !error.message.includes("schema cache")) {
+      console.error(`Failed reading learned classifications: ${error.message}`);
+      return [];
+    }
   }
 
-  return (data || []) as LearnedClassification[];
+  return [];
 }
 
 function isManualBoqClassification(row: BoqClassificationRow) {

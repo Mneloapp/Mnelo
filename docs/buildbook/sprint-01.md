@@ -70,3 +70,5 @@ Added Junction Box taxonomy support and BOQ Review guidance.
 ### Classification Rules Update
 
 Improved rules-first electrical subcategory detection while preserving Needs Review for ambiguous items.
+
+Fixed classification precedence so weak Excel context no longer blocks strong row-description rules, and strengthened manual correction preservation during reparse.

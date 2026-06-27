@@ -1,6 +1,7 @@
 import {
   classifyBoqSystem,
   inferClassificationFromExcelContext,
+  NEEDS_REVIEW_CATEGORY,
   NEEDS_REVIEW_SYSTEM,
   normalizeTakeoffUnit,
 } from "@/lib/classification";
@@ -761,8 +762,28 @@ function firstMeaningfulValue(...values: Array<null | string | undefined>) {
   return values.find((value) => {
     const normalized = value?.trim();
 
-    return Boolean(normalized && normalized !== "General" && normalized !== "Unclassified");
+    return Boolean(normalized && normalized !== "General" && normalized !== "Unclassified" && normalized !== NEEDS_REVIEW_CATEGORY);
   });
+}
+
+function isStrongClassificationResult(
+  classification:
+    | {
+        categoryName: string;
+        confidenceScore: number;
+        subcategoryName?: null | string;
+        systemName: string;
+      }
+    | null
+    | undefined,
+) {
+  return Boolean(
+    classification &&
+      classification.systemName !== NEEDS_REVIEW_SYSTEM &&
+      classification.categoryName !== NEEDS_REVIEW_CATEGORY &&
+      classification.subcategoryName &&
+      classification.confidenceScore >= 0.7,
+  );
 }
 
 function debugSystemDisplayRows(
@@ -1175,25 +1196,61 @@ export async function getProjectSystemsForCurrentUser(projectId: string) {
       item.sourceSheetName || item.sheetName,
       item.sectionHeader || item.inheritedSubcategory || item.inheritedCategory,
     );
-    const classification =
-      excelClassification ||
-      classifyBoqSystem(item.description, item.category, item.subcategory, item.classificationSubcategory);
+    const excelSystemHint =
+      excelClassification?.systemName && excelClassification.systemName !== NEEDS_REVIEW_SYSTEM
+        ? excelClassification.systemName
+        : undefined;
+    const rulesClassification = classifyBoqSystem(
+      item.description,
+      excelSystemHint || item.category,
+      item.subcategory,
+      item.classificationSubcategory,
+    );
+    const strongRulesClassification = isStrongClassificationResult(rulesClassification) ? rulesClassification : null;
+    const strongExcelClassification = isStrongClassificationResult(excelClassification) ? excelClassification : null;
+    const classification = strongRulesClassification || strongExcelClassification || rulesClassification || excelClassification;
     const hasManualSystem =
       item.classificationSource === "learned" && item.category && item.category !== "General" && item.category !== NEEDS_REVIEW_SYSTEM;
+    const hasSavedClassification =
+      !hasManualSystem &&
+      item.category &&
+      item.category !== "General" &&
+      item.category !== NEEDS_REVIEW_SYSTEM &&
+      item.subcategory &&
+      item.subcategory !== "Unclassified" &&
+      item.subcategory !== NEEDS_REVIEW_CATEGORY &&
+      Boolean(item.classificationSubcategory);
     const systemName = hasManualSystem
       ? item.category
-      : excelClassification?.systemName || firstMeaningfulValue(item.category) || classification.systemName || NEEDS_REVIEW_SYSTEM;
+      : hasSavedClassification
+        ? item.category
+        : strongRulesClassification?.systemName ||
+          strongExcelClassification?.systemName ||
+          excelSystemHint ||
+          firstMeaningfulValue(item.category) ||
+          classification.systemName ||
+          NEEDS_REVIEW_SYSTEM;
     const categoryName = hasManualSystem
       ? firstMeaningfulValue(item.subcategory, classification.categoryName, item.inheritedCategory, item.sectionHeader) || "Unclassified"
-      : firstMeaningfulValue(
-          item.inheritedCategory,
-          item.sectionHeader,
-          item.subcategory,
-          systemName && systemName !== NEEDS_REVIEW_SYSTEM ? `${systemName} Equipment` : null,
-        ) || "Unclassified";
+      : hasSavedClassification
+        ? item.subcategory
+        : strongRulesClassification?.categoryName ||
+          strongExcelClassification?.categoryName ||
+          firstMeaningfulValue(
+            item.inheritedCategory,
+            item.sectionHeader,
+            item.subcategory,
+            systemName && systemName !== NEEDS_REVIEW_SYSTEM ? `${systemName} Equipment` : null,
+          ) ||
+          "Unclassified";
     const subcategoryName = hasManualSystem
       ? firstMeaningfulValue(item.classificationSubcategory, classification.subcategoryName, item.subcategory) || "Unclassified"
-      : firstMeaningfulValue(item.inheritedSubcategory, item.subcategory, item.sectionHeader, item.category) || "Unclassified";
+      : hasSavedClassification
+        ? item.classificationSubcategory || "Unclassified"
+        : strongRulesClassification?.subcategoryName ||
+          strongExcelClassification?.subcategoryName ||
+          firstMeaningfulValue(item.inheritedSubcategory, item.subcategory, item.sectionHeader, item.category) ||
+          "Unclassified";
     const takeoffQuantity =
       row.takeoff_quantity === null || row.takeoff_quantity === undefined
         ? item.quantity
