@@ -72,3 +72,5 @@ Added Junction Box taxonomy support and BOQ Review guidance.
 Improved rules-first electrical subcategory detection while preserving Needs Review for ambiguous items.
 
 Fixed classification precedence so weak Excel context no longer blocks strong row-description rules, and strengthened manual correction preservation during reparse.
+
+Added durable manual classification memory outside parsed BOQ rows so user corrections can survive reparse even when `boq_items` rows are recreated.

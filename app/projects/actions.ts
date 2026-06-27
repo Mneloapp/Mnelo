@@ -124,15 +124,21 @@ type PreservedManualClassification = {
 };
 
 type LearnedClassification = {
-  item_description: string | null;
-  final_category: string | null;
-  final_subcategory: string | null;
   final_classification_subcategory?: string | null;
+  item_description: string | null;
+  final_category?: string | null;
+  final_subcategory?: string | null;
+  final_system?: string | null;
+  normalized_description?: string | null;
   output?: {
     category?: string | null;
     subcategory?: string | null;
     system?: string | null;
   } | null;
+  quantity?: number | null;
+  source_row_number?: number | null;
+  source_sheet_name?: string | null;
+  unit?: string | null;
   user_corrected_category: string | null;
   user_corrected_subcategory: string | null;
 };
@@ -222,16 +228,28 @@ function boqRowContentFingerprint(row: { description: string; quantity?: number 
   ].join("|");
 }
 
+function boqRowDescriptionUnitFingerprint(row: { description: string; unit?: string | null }) {
+  return [normalizeFingerprintText(row.description), normalizeFingerprintText(row.unit)].join("|");
+}
+
 function buildPreservedManualClassificationMaps(preserved: PreservedManualClassification[]) {
   const strict = new Map<string, PreservedManualClassification>();
   const content = new Map<string, PreservedManualClassification>();
+  const descriptionUnit = new Map<string, PreservedManualClassification>();
+  const descriptionCounts = new Map<string, number>();
+  const description = new Map<string, PreservedManualClassification>();
 
   for (const classification of preserved) {
     strict.set(boqRowStrictFingerprint(classification), classification);
     content.set(boqRowContentFingerprint(classification), classification);
+    descriptionUnit.set(boqRowDescriptionUnitFingerprint(classification), classification);
+
+    const descriptionFingerprint = normalizeFingerprintText(classification.description);
+    descriptionCounts.set(descriptionFingerprint, (descriptionCounts.get(descriptionFingerprint) || 0) + 1);
+    description.set(descriptionFingerprint, classification);
   }
 
-  return { content, strict };
+  return { content, description, descriptionCounts, descriptionUnit, strict };
 }
 
 function findPreservedManualClassification(
@@ -246,7 +264,15 @@ function findPreservedManualClassification(
     unit: row.unit,
   };
 
-  return maps.strict.get(boqRowStrictFingerprint(fingerprintRow)) || maps.content.get(boqRowContentFingerprint(fingerprintRow)) || null;
+  const descriptionFingerprint = normalizeFingerprintText(row.description);
+
+  return (
+    maps.strict.get(boqRowStrictFingerprint(fingerprintRow)) ||
+    maps.content.get(boqRowContentFingerprint(fingerprintRow)) ||
+    maps.descriptionUnit.get(boqRowDescriptionUnitFingerprint(fingerprintRow)) ||
+    (maps.descriptionCounts.get(descriptionFingerprint) === 1 ? maps.description.get(descriptionFingerprint) : null) ||
+    null
+  );
 }
 
 function isStrongClassification(classification: SystemClassification | null | undefined) {
@@ -465,11 +491,19 @@ function findLearnedClassification(description: string, learnedClassifications: 
 
   for (const learnedClassification of learnedClassifications) {
     const learnedDescription = learnedClassification.item_description;
-    const systemName = learnedClassification.user_corrected_category || learnedClassification.final_category || learnedClassification.output?.system;
-    const categoryName = learnedClassification.user_corrected_subcategory || learnedClassification.final_subcategory || learnedClassification.output?.category;
+    const systemName =
+      learnedClassification.final_system ||
+      learnedClassification.user_corrected_category ||
+      learnedClassification.output?.system ||
+      learnedClassification.final_category;
+    const categoryName =
+      learnedClassification.final_system
+        ? learnedClassification.final_category || learnedClassification.user_corrected_subcategory || learnedClassification.output?.category
+        : learnedClassification.user_corrected_subcategory || learnedClassification.output?.category || learnedClassification.final_subcategory;
     const subcategoryName =
-      learnedClassification.output?.subcategory ||
       learnedClassification.final_classification_subcategory ||
+      (learnedClassification.final_system ? learnedClassification.final_subcategory : null) ||
+      learnedClassification.output?.subcategory ||
       null;
 
     if (!learnedDescription || !systemName || !categoryName || !isValidSystem(systemName) || !isValidCategory(systemName, categoryName)) {
@@ -530,6 +564,8 @@ async function getLearnedClassifications(
   userId: string,
 ) {
   const selectAttempts = [
+    "item_description, normalized_description, final_system, final_category, final_subcategory, final_classification_subcategory, user_corrected_category, user_corrected_subcategory, quantity, unit, source_sheet_name, source_row_number, output",
+    "item_description, final_system, final_category, final_subcategory, final_classification_subcategory, user_corrected_category, user_corrected_subcategory, output",
     "item_description, final_category, final_subcategory, final_classification_subcategory, user_corrected_category, user_corrected_subcategory, output",
     "item_description, final_category, final_subcategory, user_corrected_category, user_corrected_subcategory, output",
   ];
@@ -549,7 +585,16 @@ async function getLearnedClassifications(
       return ((data || []) as unknown) as LearnedClassification[];
     }
 
-    if (!error.message.includes("final_classification_subcategory") && !error.message.includes("schema cache")) {
+    if (
+      !error.message.includes("final_system") &&
+      !error.message.includes("final_classification_subcategory") &&
+      !error.message.includes("normalized_description") &&
+      !error.message.includes("source_sheet_name") &&
+      !error.message.includes("source_row_number") &&
+      !error.message.includes("quantity") &&
+      !error.message.includes("unit") &&
+      !error.message.includes("schema cache")
+    ) {
       console.error(`Failed reading learned classifications: ${error.message}`);
       return [];
     }
@@ -570,6 +615,144 @@ function isManualBoqClassification(row: BoqClassificationRow) {
         confidenceScore >= 1 &&
         (reason.includes("manual") || reason.includes("user"))),
   );
+}
+
+function manualClassificationMemoryPayload({
+  category,
+  classificationSubcategory,
+  confidenceScore = 1,
+  description,
+  projectId,
+  quantity,
+  reason,
+  rowId,
+  rowNumber,
+  sheetName,
+  sourceFileId,
+  subcategory,
+  unit,
+  userId,
+}: {
+  category: string;
+  classificationSubcategory: string | null;
+  confidenceScore?: number;
+  description: string;
+  projectId: string;
+  quantity?: number | null;
+  reason?: string | null;
+  rowId?: string | null;
+  rowNumber?: number | null;
+  sheetName?: string | null;
+  sourceFileId?: string | null;
+  subcategory: string;
+  unit?: string | null;
+  userId: string;
+}) {
+  const normalizedDescription = normalizeFingerprintText(description);
+  const strictFingerprint = boqRowStrictFingerprint({
+    description,
+    quantity,
+    rowNumber,
+    sheetName,
+    unit,
+  });
+
+  return {
+    confidence_score: confidenceScore,
+    feedback: reason || "Manual classification memory",
+    final_category: subcategory,
+    final_classification_subcategory: classificationSubcategory,
+    final_subcategory: classificationSubcategory,
+    final_system: category,
+    input: {
+      description,
+      normalized_description: normalizedDescription,
+      quantity,
+      row_number: rowNumber,
+      sheet_name: sheetName,
+      strict_fingerprint: strictFingerprint,
+      unit,
+    },
+    item_description: description,
+    item_fingerprint: strictFingerprint,
+    normalized_description: normalizedDescription,
+    output: {
+      category: subcategory,
+      subcategory: classificationSubcategory,
+      system: category,
+    },
+    project_id: projectId,
+    quantity,
+    source_file_id: sourceFileId || null,
+    source_id: rowId || null,
+    source_row_number: rowNumber,
+    source_sheet_name: sheetName,
+    source_type: "manual_classification_memory",
+    unit,
+    updated_at: new Date().toISOString(),
+    user_corrected_category: category,
+    user_corrected_subcategory: subcategory,
+    user_id: userId,
+  };
+}
+
+async function persistManualClassificationMemory({
+  records,
+  supabase,
+}: {
+  records: Array<ReturnType<typeof manualClassificationMemoryPayload>>;
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+}) {
+  if (records.length === 0) {
+    return;
+  }
+
+  const fullResult = await supabase.from("ai_training_data").insert(records);
+
+  if (!fullResult.error) {
+    return;
+  }
+
+  const canFallback =
+    fullResult.error.message.includes("schema cache") ||
+    fullResult.error.message.includes("final_system") ||
+    fullResult.error.message.includes("final_classification_subcategory") ||
+    fullResult.error.message.includes("normalized_description") ||
+    fullResult.error.message.includes("item_fingerprint") ||
+    fullResult.error.message.includes("source_sheet_name") ||
+    fullResult.error.message.includes("source_row_number") ||
+    fullResult.error.message.includes("quantity") ||
+    fullResult.error.message.includes("unit") ||
+    fullResult.error.message.includes("updated_at");
+
+  if (!canFallback) {
+    console.error(`Failed saving manual classification memory: ${fullResult.error.message}`);
+    return;
+  }
+
+  const legacyRecords = records.map((record) => ({
+    confidence_score: record.confidence_score,
+    feedback: record.feedback,
+    final_category: record.final_system,
+    final_subcategory: record.final_category,
+    input: record.input,
+    item_description: record.item_description,
+    output: record.output,
+    predicted_category: record.final_system,
+    predicted_subcategory: record.final_category,
+    project_id: record.project_id,
+    source_file_id: record.source_file_id,
+    source_id: record.source_id,
+    source_type: record.source_type,
+    user_corrected_category: record.final_system,
+    user_corrected_subcategory: record.final_category,
+    user_id: record.user_id,
+  }));
+  const legacyResult = await supabase.from("ai_training_data").insert(legacyRecords);
+
+  if (legacyResult.error) {
+    console.error(`Failed saving legacy manual classification memory: ${legacyResult.error.message}`);
+  }
 }
 
 async function getPreservedManualClassificationsForProject({
@@ -616,7 +799,7 @@ async function getPreservedManualClassificationsForProject({
     }
   }
 
-  return ((rows || []) as BoqClassificationRow[])
+  const currentManualClassifications = ((rows || []) as BoqClassificationRow[])
     .filter((row) => (!row.row_type || row.row_type === "item") && isManualBoqClassification(row))
     .map((row) => ({
       category: row.category || NEEDS_REVIEW_SYSTEM,
@@ -635,6 +818,95 @@ async function getPreservedManualClassificationsForProject({
       subcategory: row.subcategory || NEEDS_REVIEW_CATEGORY,
       unit: row.unit || null,
     })) satisfies PreservedManualClassification[];
+
+  await persistManualClassificationMemory({
+    records: currentManualClassifications.map((classification) =>
+      manualClassificationMemoryPayload({
+        category: classification.category,
+        classificationSubcategory: classification.classificationSubcategory,
+        confidenceScore: classification.confidenceScore,
+        description: classification.description,
+        projectId,
+        quantity: classification.quantity,
+        reason: classification.classificationReason || "Backfilled manual correction before reparse.",
+        rowNumber: classification.rowNumber,
+        sheetName: classification.sheetName,
+        subcategory: classification.subcategory,
+        unit: classification.unit,
+        userId,
+      }),
+    ),
+    supabase,
+  });
+
+  const memorySelectAttempts = [
+    "item_description, normalized_description, item_fingerprint, source_sheet_name, source_row_number, quantity, unit, final_system, final_category, final_subcategory, final_classification_subcategory, user_corrected_category, user_corrected_subcategory, output, confidence_score, feedback",
+    "item_description, final_category, final_subcategory, final_classification_subcategory, user_corrected_category, user_corrected_subcategory, output, confidence_score, feedback",
+    "item_description, final_category, final_subcategory, user_corrected_category, user_corrected_subcategory, output, confidence_score, feedback",
+  ];
+  let memoryRows: unknown[] = [];
+
+  for (const selectColumns of memorySelectAttempts) {
+    const result = await supabase
+      .from("ai_training_data")
+      .select(selectColumns)
+      .eq("project_id", projectId)
+      .eq("user_id", userId)
+      .not("item_description", "is", null)
+      .not("user_corrected_category", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(2000);
+
+    if (!result.error) {
+      memoryRows = result.data || [];
+      break;
+    }
+
+    if (
+      !result.error.message.includes("schema cache") &&
+      !result.error.message.includes("final_system") &&
+      !result.error.message.includes("final_classification_subcategory") &&
+      !result.error.message.includes("normalized_description") &&
+      !result.error.message.includes("item_fingerprint") &&
+      !result.error.message.includes("source_sheet_name") &&
+      !result.error.message.includes("source_row_number") &&
+      !result.error.message.includes("quantity") &&
+      !result.error.message.includes("unit")
+    ) {
+      console.error(`Failed reading durable manual classification memory: ${result.error.message}`);
+      break;
+    }
+  }
+
+  const durableManualClassifications = ((memoryRows || []) as LearnedClassification[])
+    .map((row): PreservedManualClassification | null => {
+      const systemName = row.final_system || row.user_corrected_category || row.output?.system || row.final_category;
+      const categoryName = row.final_system
+        ? row.final_category || row.user_corrected_subcategory || row.output?.category
+        : row.user_corrected_subcategory || row.output?.category || row.final_subcategory;
+      const subcategoryName =
+        row.final_classification_subcategory || (row.final_system ? row.final_subcategory : null) || row.output?.subcategory || null;
+
+      if (!row.item_description || !systemName || !categoryName || !subcategoryName) {
+        return null;
+      }
+
+      return {
+        category: systemName,
+        classificationReason: "Restored from durable manual classification memory.",
+        classificationSubcategory: subcategoryName,
+        confidenceScore: 1,
+        description: row.item_description,
+        quantity: row.quantity === null || row.quantity === undefined ? null : Number(row.quantity || 0),
+        rowNumber: row.source_row_number === null || row.source_row_number === undefined ? null : Number(row.source_row_number),
+        sheetName: row.source_sheet_name || null,
+        subcategory: categoryName,
+        unit: row.unit || null,
+      } satisfies PreservedManualClassification;
+    })
+    .filter((classification): classification is PreservedManualClassification => classification !== null);
+
+  return [...currentManualClassifications, ...durableManualClassifications];
 }
 
 async function getAuthenticatedUser() {
@@ -2100,7 +2372,9 @@ export async function correctBoqItemSystemClassification(formData: FormData) {
 
     const { data: row, error: rowError } = await supabase
       .from("boq_items")
-      .select("id, description, quantity, unit, amount, category, subcategory, classification_subcategory")
+      .select(
+        "id, description, quantity, unit, amount, category, subcategory, classification_subcategory, source_file_id, project_file_id, source_sheet_name, source_row_number, sheet_name, row_number",
+      )
       .eq("id", itemId)
       .eq("project_id", projectId)
       .eq("user_id", user.id)
@@ -2146,36 +2420,27 @@ export async function correctBoqItemSystemClassification(formData: FormData) {
       return { ok: false, error: updateError } satisfies ProjectDocumentActionResult;
     }
 
-    const { error: learningError } = await supabase.from("ai_training_data").insert({
-      project_id: projectId,
-      user_id: user.id,
-      source_type: "system_classification_correction",
-      source_id: itemId,
-      item_description: (row as BoqClassificationRow).description,
-      predicted_category: (row as BoqClassificationRow).category || previousClassification.systemName,
-      predicted_subcategory: (row as BoqClassificationRow).subcategory || previousClassification.categoryName,
-      predicted_supplier_type: previousClassification.supplierType,
-      confidence_score: previousClassification.confidenceScore,
-      user_corrected_category: systemName,
-      user_corrected_subcategory: categoryName,
-      final_category: systemName,
-      final_subcategory: categoryName,
-      input: {
-        description: (row as BoqClassificationRow).description,
-        previous_category: (row as BoqClassificationRow).category,
-        previous_subcategory: (row as BoqClassificationRow).subcategory,
-      },
-      output: {
-        category: categoryName,
-        subcategory: subcategoryName,
-        system: systemName,
-      },
-      feedback: "User system classification correction",
+    await persistManualClassificationMemory({
+      records: [
+        manualClassificationMemoryPayload({
+          category: systemName,
+          classificationSubcategory: subcategoryName,
+          confidenceScore: previousClassification.confidenceScore,
+          description: (row as BoqClassificationRow).description,
+          projectId,
+          quantity: (row as BoqClassificationRow).quantity,
+          reason: "User system classification correction",
+          rowId: itemId,
+          rowNumber: (row as BoqClassificationRow).source_row_number || (row as BoqClassificationRow).row_number || null,
+          sheetName: (row as BoqClassificationRow).source_sheet_name || (row as BoqClassificationRow).sheet_name || null,
+          sourceFileId: (row as BoqClassificationRow).source_file_id || (row as BoqClassificationRow).project_file_id || null,
+          subcategory: categoryName,
+          unit: (row as BoqClassificationRow).unit,
+          userId: user.id,
+        }),
+      ],
+      supabase,
     });
-
-    if (learningError) {
-      console.error(`Failed saving system classification learning record: ${learningError.message}`);
-    }
 
     revalidatePath(`/projects/${projectId}`);
     revalidatePath(`/projects/${projectId}/intelligence`);
@@ -2261,6 +2526,8 @@ export async function bulkCorrectBoqItemClassifications(formData: FormData) {
     const itemIds = Array.from(new Set(changes.map((change) => change.itemId)));
     const changesById = new Map(changes.map((change) => [change.itemId, change]));
     const rowSelects = [
+      "id, description, quantity, unit, amount, category, subcategory, classification_subcategory, source_file_id, project_file_id, source_sheet_name, source_row_number, sheet_name, row_number, row_type",
+      "id, description, quantity, unit, amount, category, subcategory, source_file_id, project_file_id, source_sheet_name, source_row_number, sheet_name, row_number, row_type",
       "id, description, quantity, unit, amount, category, subcategory, classification_subcategory, source_file_id, project_file_id, row_type",
       "id, description, quantity, unit, amount, category, subcategory, source_file_id, project_file_id, row_type",
       "id, description, quantity, unit, amount, category, subcategory, source_file_id, row_type",
@@ -2290,6 +2557,8 @@ export async function bulkCorrectBoqItemClassifications(formData: FormData) {
         result.error.message.includes("classification_subcategory") ||
         result.error.message.includes("project_file_id") ||
         result.error.message.includes("source_file_id") ||
+        result.error.message.includes("source_sheet_name") ||
+        result.error.message.includes("source_row_number") ||
         result.error.message.includes("row_type");
 
       if (!canRetrySchemaFallback) {
@@ -2365,40 +2634,24 @@ export async function bulkCorrectBoqItemClassifications(formData: FormData) {
       const change = changesById.get(row.id);
       const previousClassification = classifyBoqSystem(row.description, row.category, row.subcategory);
 
-      return {
-        project_id: projectId,
-        user_id: user.id,
-        source_file_id: row.source_file_id || row.project_file_id || null,
-        source_type: "bulk_system_classification_correction",
-        source_id: row.id,
-        item_description: row.description,
-        predicted_category: row.category || previousClassification.systemName,
-        predicted_subcategory: row.subcategory || previousClassification.categoryName,
-        predicted_supplier_type: previousClassification.supplierType,
-        confidence_score: previousClassification.confidenceScore,
-        user_corrected_category: change?.systemName,
-        user_corrected_subcategory: change?.categoryName,
-        final_category: change?.systemName,
-        final_subcategory: change?.categoryName,
-        input: {
-          description: row.description,
-          previous_category: row.category,
-          previous_subcategory: row.subcategory,
-        },
-        output: {
-          category: change?.categoryName,
-          needs_review: change?.needsReview,
-          subcategory: change?.subcategoryName,
-          system: change?.systemName,
-        },
-        feedback: "Manual bulk correction",
-      };
+      return manualClassificationMemoryPayload({
+        category: change?.systemName || NEEDS_REVIEW_SYSTEM,
+        classificationSubcategory: change?.subcategoryName || null,
+        confidenceScore: previousClassification.confidenceScore,
+        description: row.description,
+        projectId,
+        quantity: row.quantity,
+        reason: "Manual bulk correction",
+        rowId: row.id,
+        rowNumber: row.source_row_number || row.row_number || null,
+        sheetName: row.source_sheet_name || row.sheet_name || null,
+        sourceFileId: row.source_file_id || row.project_file_id || null,
+        subcategory: change?.categoryName || NEEDS_REVIEW_CATEGORY,
+        unit: row.unit,
+        userId: user.id,
+      });
     });
-    const { error: learningError } = await supabase.from("ai_training_data").insert(learningRows);
-
-    if (learningError) {
-      console.error(`Failed saving bulk classification learning records: ${learningError.message}`);
-    }
+    await persistManualClassificationMemory({ records: learningRows, supabase });
 
     revalidatePath(`/projects/${projectId}`);
     revalidatePath(`/projects/${projectId}/intelligence`);
