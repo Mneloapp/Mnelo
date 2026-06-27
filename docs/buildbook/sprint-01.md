@@ -52,3 +52,9 @@ Users upload an entire tender package. Mnelo understands the project. It creates
 ## Delivery Notes
 
 Sprint 1 must prioritize correctness, traceability and reviewability over automation. The output should create the foundation for RFQ automation, supplier intelligence and quote comparison.
+
+## Delivery Updates
+
+### Deliverable 2 — Processing Pipeline Foundation
+
+Deliverable 2 introduced the first project-level processing pipeline foundation. The Project Workspace can now display document processing items with status, stage, confidence, errors and timestamp. Until dedicated processing job records exist, the pipeline view is safely derived from existing uploaded project files and parsed BOQ state.

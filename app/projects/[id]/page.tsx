@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Activity, Brain, FileText, Info, Plus, Settings } from "lucide-react";
+import { Brain, FileText, Info, Plus, Settings } from "lucide-react";
 import { BoqResultsTable } from "@/components/boq-results-table";
 import { ProjectDocumentsPanel } from "@/components/project-documents-panel";
+import { ProjectProcessingPanel } from "@/components/project-processing-panel";
 import { ProjectSystemsPanel } from "@/components/project-systems-panel";
 import { WorkspaceShell } from "@/components/workspace-shell";
+import { deriveProjectProcessingItems } from "@/lib/project-processing";
 import {
   getBoqItemsForCurrentUser,
   getLearningRecordsForCurrentUser,
@@ -98,6 +100,7 @@ export default async function ProjectDetailsPage({
   if (parsedFileIds.length === 0 && boqItems.length > 0 && files.length === 1) {
     parsedFileIds.push(files[0].id);
   }
+  const processingItems = deriveProjectProcessingItems({ files, parsedFileIds });
   const lastUpload = files[0]?.uploadedAt || "No uploads";
   const itemBoqRows = boqItems.filter((item) => item.rowType === "item");
   const lastParse = boqItems[boqItems.length - 1]?.createdAt || "No parsed BOQ";
@@ -363,15 +366,11 @@ export default async function ProjectDetailsPage({
         </WorkspaceSection>
 
         <WorkspaceSection
-          description="Project events will provide an audit trail for uploads, parsing, AI processing, confirmations and future procurement actions."
+          description="Project events and document processing status for the first Project Intelligence Engine pipeline."
           id="activity"
           title="Activity"
         >
-          <WorkspacePlaceholder
-            description="Activity events are reserved for the Project Intelligence Engine. Uploads, parsing results and review actions will appear here as the processing pipeline matures."
-            icon={Activity}
-            title="Activity timeline reserved"
-          />
+          <ProjectProcessingPanel items={processingItems} />
         </WorkspaceSection>
 
         <WorkspaceSection
