@@ -13,7 +13,6 @@ import {
 import type { BoqRowType } from "@/lib/boq-cleanup";
 import {
   classifyBoqSystem,
-  getDefaultSubcategory,
   getSystemRuleOptions,
   inferClassificationFromExcelContext,
   isValidCategory,
@@ -322,15 +321,13 @@ function findLearnedClassification(description: string, learnedClassifications: 
     const subcategoryName =
       learnedClassification.output?.subcategory ||
       learnedClassification.final_classification_subcategory ||
-      (systemName && categoryName ? getDefaultSubcategory(systemName, categoryName) : null);
+      null;
 
     if (!learnedDescription || !systemName || !categoryName || !isValidSystem(systemName) || !isValidCategory(systemName, categoryName)) {
       continue;
     }
 
-    const validSubcategory = isValidSubcategory(systemName, categoryName, subcategoryName)
-      ? subcategoryName
-      : getDefaultSubcategory(systemName, categoryName);
+    const validSubcategory = isValidSubcategory(systemName, categoryName, subcategoryName) ? subcategoryName : null;
     const learnedTokens = Array.from(descriptionTokens(learnedDescription));
     const normalizedLearnedDescription = learnedDescription
       .toLowerCase()
@@ -1593,7 +1590,7 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
           confidenceScore: Number(row.classification_confidence || 1),
           reason: row.classification_reason || "User confirmed this classification.",
           source: "learned",
-          subcategoryName: row.classification_subcategory || getDefaultSubcategory(row.category, row.subcategory),
+          subcategoryName: row.classification_subcategory || null,
           supplierType: classifyBoqSystem(row.description, row.category, row.subcategory, row.classification_subcategory).supplierType,
           systemName: row.category,
         } satisfies SystemClassification,
@@ -1836,7 +1833,7 @@ export async function correctBoqItemSystemClassification(formData: FormData) {
     const itemId = readString(formData, "item_id");
     const systemName = readString(formData, "system_name");
     const categoryName = readString(formData, "category_name");
-    const subcategoryName = readString(formData, "subcategory_name") || getDefaultSubcategory(systemName, categoryName);
+    const subcategoryName = readString(formData, "subcategory_name") || null;
     const needsReview = readString(formData, "needs_review") === "true";
 
     if (!projectId || !itemId || !systemName || !categoryName) {
@@ -1971,7 +1968,7 @@ function parseBulkManualClassificationChanges(formData: FormData) {
 
   const systemName = readString(formData, "system_name");
   const categoryName = readString(formData, "category_name") || defaultCategoryForSystemName(systemName);
-  const subcategoryName = readString(formData, "subcategory_name") || getDefaultSubcategory(systemName, categoryName);
+  const subcategoryName = readString(formData, "subcategory_name") || null;
   const needsReviewMode = readString(formData, "needs_review_mode");
   const needsReview = needsReviewMode === "mark";
   const itemIds = formData

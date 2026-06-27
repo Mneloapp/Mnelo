@@ -37,6 +37,20 @@ function defaultCategoryForSystem(systemName: string) {
   return getDefaultCategory(systemName) || NEEDS_REVIEW_CATEGORY;
 }
 
+function defaultSubcategoryForDraft(systemName: string, categoryName: string) {
+  if (categoryName === NEEDS_REVIEW_CATEGORY || systemName === NEEDS_REVIEW_SYSTEM) {
+    return null;
+  }
+
+  return getDefaultSubcategory(systemName, categoryName);
+}
+
+function categoryOptionsForSystem(systemName: string) {
+  const categories = getCategoryOptions(systemName);
+
+  return categories.includes(NEEDS_REVIEW_CATEGORY) ? categories : [NEEDS_REVIEW_CATEGORY, ...categories];
+}
+
 function sourceLabel(source: string) {
   if (source === "ai") {
     return "AI";
@@ -61,7 +75,7 @@ function draftForItem(item: SystemBoqItem, systemName: string, categoryName: str
   return {
     categoryName,
     needsReview: item.needsReview,
-    subcategoryName: item.classificationSubcategory || getDefaultSubcategory(systemName, categoryName),
+    subcategoryName: item.classificationSubcategory || defaultSubcategoryForDraft(systemName, categoryName),
     systemName,
   };
 }
@@ -105,7 +119,7 @@ export function ProjectSystemsPanel({
   const [bulkSystem, setBulkSystem] = useState(systemOptions[0]?.systemName || "");
   const [bulkCategory, setBulkCategory] = useState(defaultCategoryForSystem(systemOptions[0]?.systemName || ""));
   const [bulkSubcategory, setBulkSubcategory] = useState(
-    getDefaultSubcategory(systemOptions[0]?.systemName || "", defaultCategoryForSystem(systemOptions[0]?.systemName || "")),
+    defaultSubcategoryForDraft(systemOptions[0]?.systemName || "", defaultCategoryForSystem(systemOptions[0]?.systemName || "")),
   );
 
   const allRows = useMemo(
@@ -616,7 +630,7 @@ export function ProjectSystemsPanel({
               onChange={(event) => {
                 const nextSystem = event.currentTarget.value;
                 const nextCategory = defaultCategoryForSystem(nextSystem);
-                const nextSubcategory = getDefaultSubcategory(nextSystem, nextCategory);
+                const nextSubcategory = defaultSubcategoryForDraft(nextSystem, nextCategory);
                 setBulkSystem(nextSystem);
                 setBulkCategory(nextCategory);
                 setBulkSubcategory(nextSubcategory);
@@ -636,13 +650,13 @@ export function ProjectSystemsPanel({
               className="h-10 rounded-xl border border-[#bbf7d0] bg-white px-3 text-sm font-medium text-[#0f172a] outline-none focus:border-[#16a34a] focus:ring-4 focus:ring-[#dcfce7]"
               onChange={(event) => {
                 const nextCategory = event.currentTarget.value;
-                const nextSubcategory = getDefaultSubcategory(bulkSystem, nextCategory);
+                const nextSubcategory = defaultSubcategoryForDraft(bulkSystem, nextCategory);
                 setBulkCategory(nextCategory);
                 setBulkSubcategory(nextSubcategory);
               }}
               value={bulkCategory}
             >
-              {getCategoryOptions(bulkSystem).map((category) => (
+              {categoryOptionsForSystem(bulkSystem).map((category) => (
                 <option key={`visible-${bulkSystem}-${category}`} value={category}>
                   {category}
                 </option>
@@ -654,8 +668,9 @@ export function ProjectSystemsPanel({
             <select
               className="h-10 rounded-xl border border-[#bbf7d0] bg-white px-3 text-sm font-medium text-[#0f172a] outline-none focus:border-[#16a34a] focus:ring-4 focus:ring-[#dcfce7]"
               onChange={(event) => setBulkSubcategory(event.currentTarget.value)}
-              value={bulkSubcategory}
+              value={bulkSubcategory || ""}
             >
+              <option value="">Choose subcategory</option>
               {getSubcategoryOptions(bulkSystem, bulkCategory).map((subcategory) => (
                 <option key={`visible-${bulkSystem}-${bulkCategory}-${subcategory}`} value={subcategory}>
                   {subcategory}
@@ -728,7 +743,7 @@ export function ProjectSystemsPanel({
               onChange={(event) => {
                 const nextSystem = event.currentTarget.value;
                 const nextCategory = defaultCategoryForSystem(nextSystem);
-                const nextSubcategory = getDefaultSubcategory(nextSystem, nextCategory);
+                const nextSubcategory = defaultSubcategoryForDraft(nextSystem, nextCategory);
                 setBulkSystem(nextSystem);
                 setBulkCategory(nextCategory);
                 setBulkSubcategory(nextSubcategory);
@@ -746,14 +761,14 @@ export function ProjectSystemsPanel({
               className="h-10 rounded-xl border border-[#e5e7eb] bg-white px-3 text-sm outline-none focus:border-[#16a34a] focus:ring-4 focus:ring-[#dcfce7]"
               onChange={(event) => {
                 const nextCategory = event.currentTarget.value;
-                const nextSubcategory = getDefaultSubcategory(bulkSystem, nextCategory);
+                const nextSubcategory = defaultSubcategoryForDraft(bulkSystem, nextCategory);
                 setBulkCategory(nextCategory);
                 setBulkSubcategory(nextSubcategory);
                 applyBulkPatch({ categoryName: nextCategory, subcategoryName: nextSubcategory });
               }}
               value={bulkCategory}
             >
-              {getCategoryOptions(bulkSystem).map((category) => (
+              {categoryOptionsForSystem(bulkSystem).map((category) => (
                 <option key={`${bulkSystem}-${category}`} value={category}>
                   {category}
                 </option>
@@ -765,8 +780,9 @@ export function ProjectSystemsPanel({
                 setBulkSubcategory(event.currentTarget.value);
                 applyBulkPatch({ subcategoryName: event.currentTarget.value });
               }}
-              value={bulkSubcategory}
+              value={bulkSubcategory || ""}
             >
+              <option value="">Choose subcategory</option>
               {getSubcategoryOptions(bulkSystem, bulkCategory).map((subcategory) => (
                 <option key={`${bulkSystem}-${bulkCategory}-${subcategory}`} value={subcategory}>
                   {subcategory}
@@ -1003,7 +1019,7 @@ export function ProjectSystemsPanel({
                                     const nextCategory = defaultCategoryForSystem(nextSystem);
                                     updateDraft(item.id, {
                                       categoryName: nextCategory,
-                                      subcategoryName: getDefaultSubcategory(nextSystem, nextCategory),
+                                      subcategoryName: defaultSubcategoryForDraft(nextSystem, nextCategory),
                                       systemName: nextSystem,
                                     });
                                   }}
@@ -1021,12 +1037,12 @@ export function ProjectSystemsPanel({
                                     const nextCategory = event.currentTarget.value;
                                     updateDraft(item.id, {
                                       categoryName: nextCategory,
-                                      subcategoryName: getDefaultSubcategory(draft.systemName, nextCategory),
+                                      subcategoryName: defaultSubcategoryForDraft(draft.systemName, nextCategory),
                                     });
                                   }}
                                   value={draft.categoryName}
                                 >
-                                  {getCategoryOptions(draft.systemName).map((categoryOption) => (
+                                  {categoryOptionsForSystem(draft.systemName).map((categoryOption) => (
                                     <option key={`${item.id}-${draft.systemName}-${categoryOption}`} value={categoryOption}>
                                       {categoryOption}
                                     </option>
@@ -1037,6 +1053,7 @@ export function ProjectSystemsPanel({
                                   onChange={(event) => updateDraft(item.id, { subcategoryName: event.currentTarget.value })}
                                   value={draft.subcategoryName || ""}
                                 >
+                                  <option value="">Choose subcategory</option>
                                   {getSubcategoryOptions(draft.systemName, draft.categoryName).map((subcategoryOption) => (
                                     <option
                                       key={`${item.id}-${draft.systemName}-${draft.categoryName}-${subcategoryOption}`}

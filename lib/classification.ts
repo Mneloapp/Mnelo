@@ -572,8 +572,8 @@ function scoreRule(description: string, rule: SystemRule) {
 export function getSystemRuleOptions() {
   return [
     ...taxonomy.map((system) => ({
-      categoryName: system.categories[0]?.name || "General",
-      subcategoryName: system.categories[0]?.subcategories[0] || null,
+      categoryName: NEEDS_REVIEW_CATEGORY,
+      subcategoryName: null,
       systemName: system.name,
     })),
     {
@@ -673,7 +673,7 @@ export function inferClassificationFromExcelContext(sheetName?: string | null, s
     ? contextualMatch.categoryName
     : ruleClassification && ruleClassification.systemName === systemName && ruleClassification.categoryName !== NEEDS_REVIEW_CATEGORY
       ? ruleClassification.categoryName
-      : getDefaultCategory(systemName);
+      : NEEDS_REVIEW_CATEGORY;
   const subcategoryName = contextualMatch
     ? contextualMatch.subcategoryName
     : ruleClassification &&
@@ -681,13 +681,18 @@ export function inferClassificationFromExcelContext(sheetName?: string | null, s
     ruleClassification.subcategoryName &&
     ruleClassification.subcategoryName !== NEEDS_REVIEW_SUBCATEGORY
       ? ruleClassification.subcategoryName
-      : sectionHeader || getDefaultSubcategory(systemName, categoryName);
+      : null;
+  const hasConfidentCategory = categoryName !== NEEDS_REVIEW_CATEGORY && Boolean(subcategoryName);
 
   return {
     categoryName,
-    confidenceScore: sectionHeader ? 0.82 : 0.74,
-    reason: sectionHeader ? "Inherited from sheet and section header." : "Inherited from sheet name.",
-    source: "inherited_header",
+    confidenceScore: hasConfidentCategory ? (sectionHeader ? 0.82 : 0.74) : 0.48,
+    reason: hasConfidentCategory
+      ? sectionHeader
+        ? "Inherited from sheet and section header."
+        : "Inherited from sheet name."
+      : "System inferred, category requires review.",
+    source: hasConfidentCategory ? "inherited_header" : "rules",
     subcategoryName,
     supplierType: supplierTypeForSystem(systemName),
     systemName,
@@ -735,17 +740,20 @@ export function classifyBoqSystem(
 
   if (existingCategory && existingCategory !== "General" && knownSystemNames.has(existingCategory.toLowerCase())) {
     const categoryName =
-      existingSubcategory && isValidCategory(existingCategory, existingSubcategory)
-        ? existingSubcategory
-        : getDefaultCategory(existingCategory);
+      existingSubcategory && isValidCategory(existingCategory, existingSubcategory) ? existingSubcategory : NEEDS_REVIEW_CATEGORY;
+    const subcategoryName =
+      categoryName !== NEEDS_REVIEW_CATEGORY &&
+      existingClassificationSubcategory &&
+      isValidSubcategory(existingCategory, categoryName, existingClassificationSubcategory)
+        ? existingClassificationSubcategory
+        : null;
 
     return {
       categoryName,
-      confidenceScore: 0.5,
-      subcategoryName:
-        existingClassificationSubcategory && isValidSubcategory(existingCategory, categoryName, existingClassificationSubcategory)
-          ? existingClassificationSubcategory
-          : getDefaultSubcategory(existingCategory, categoryName),
+      confidenceScore: subcategoryName ? 0.5 : 0.38,
+      reason: subcategoryName ? "Existing classification retained." : "System detected, category requires review.",
+      source: "rules",
+      subcategoryName,
       supplierType: supplierTypeForSystem(existingCategory),
       systemName: existingCategory,
     } satisfies SystemClassification;
