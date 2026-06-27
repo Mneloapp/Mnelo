@@ -10,6 +10,7 @@ This capability map defines what Mnelo must become over time. It is not a featur
 | --- | --- | --- |
 | Project Workspace | Central workspace for documents, BOQ, systems and procurement activity | Foundation |
 | Upload Engine | Reliable ingestion of Excel, PDF and project documents | Foundation |
+| AI Runtime | Shared agent execution, context preparation, provider adapters and audit-ready result formatting | Foundation |
 | Document Intelligence | Classify documents and extract structure | Project Intelligence |
 | BOQ Parsing | Extract rows, quantities, units, sections and sheet context | Project Intelligence |
 | Entity Extraction | Identify products, systems, specifications, manufacturers and models | Project Intelligence |
