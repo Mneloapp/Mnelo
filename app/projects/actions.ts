@@ -1343,7 +1343,7 @@ async function getSystemReferenceMaps({
 async function updateBoqItemClassification({
   categoryId,
   classification,
-  requireClassificationSubcategory = false,
+  requireManualPersistence = false,
   row,
   supabase,
   systemId,
@@ -1352,7 +1352,7 @@ async function updateBoqItemClassification({
   categoryId?: string;
   classification: SystemClassification;
   needsReviewOverride?: boolean;
-  requireClassificationSubcategory?: boolean;
+  requireManualPersistence?: boolean;
   row: BoqClassificationRow;
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
   systemId?: string;
@@ -1416,17 +1416,21 @@ async function updateBoqItemClassification({
       category: classification.systemName,
       subcategory: classification.categoryName,
     },
-  ].filter((payload) => !requireClassificationSubcategory || "classification_subcategory" in payload);
+  ].filter(
+    (payload) =>
+      !requireManualPersistence ||
+      ("classification_subcategory" in payload && "classification_source" in payload && "classification_reason" in payload),
+  );
   let lastError: string | null = null;
 
   for (const payload of updateAttempts) {
     const { error } = await supabase.from("boq_items").update(payload).eq("id", row.id);
 
     if (!error) {
-      if (requireClassificationSubcategory) {
+      if (requireManualPersistence) {
         const { data: verificationRow, error: verificationError } = await supabase
           .from("boq_items")
-          .select("classification_subcategory")
+          .select("category, subcategory, classification_subcategory, classification_source")
           .eq("id", row.id)
           .maybeSingle();
 
@@ -1434,11 +1438,22 @@ async function updateBoqItemClassification({
           return verificationError.message;
         }
 
-        const savedSubcategory = (verificationRow as { classification_subcategory?: string | null } | null)
-          ?.classification_subcategory;
+        const savedClassification = verificationRow as
+          | {
+              category?: string | null;
+              classification_source?: string | null;
+              classification_subcategory?: string | null;
+              subcategory?: string | null;
+            }
+          | null;
 
-        if (savedSubcategory !== classification.subcategoryName) {
-          return "Manual subcategory was not persisted. Check that boq_items.classification_subcategory exists in Supabase.";
+        if (
+          savedClassification?.category !== classification.systemName ||
+          savedClassification?.subcategory !== classification.categoryName ||
+          savedClassification?.classification_subcategory !== classification.subcategoryName ||
+          savedClassification?.classification_source !== "learned"
+        ) {
+          return "Manual classification was not fully persisted. Check boq_items category, subcategory, classification_subcategory, and classification_source in Supabase.";
         }
       }
 
@@ -1867,7 +1882,7 @@ export async function correctBoqItemSystemClassification(formData: FormData) {
       categoryId,
       classification,
       needsReviewOverride: needsReview,
-      requireClassificationSubcategory: true,
+      requireManualPersistence: true,
       row: row as BoqClassificationRow,
       supabase,
       systemId,
@@ -1909,6 +1924,7 @@ export async function correctBoqItemSystemClassification(formData: FormData) {
     }
 
     revalidatePath(`/projects/${projectId}`);
+    revalidatePath(`/projects/${projectId}/intelligence`);
     revalidatePath("/boq");
     revalidatePath("/learning");
 
@@ -2073,7 +2089,7 @@ export async function bulkCorrectBoqItemClassifications(formData: FormData) {
             categoryId,
             classification,
             needsReviewOverride: change?.needsReview ?? false,
-            requireClassificationSubcategory: Boolean(classification.subcategoryName),
+            requireManualPersistence: true,
             row,
             supabase,
             systemId,
@@ -2131,6 +2147,7 @@ export async function bulkCorrectBoqItemClassifications(formData: FormData) {
     }
 
     revalidatePath(`/projects/${projectId}`);
+    revalidatePath(`/projects/${projectId}/intelligence`);
     revalidatePath("/boq");
     revalidatePath("/learning");
 
