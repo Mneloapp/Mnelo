@@ -8,6 +8,7 @@ This capability map defines what Mnelo must become over time. It is not a featur
 
 | Capability Area | Description | Stage |
 | --- | --- | --- |
+| Domain Model | Shared construction procurement language for AI Runtime, Knowledge Graph and Procurement Engine | Foundation |
 | Project Workspace | Central workspace for documents, BOQ, systems and procurement activity | Foundation |
 | Upload Engine | Reliable ingestion of Excel, PDF and project documents | Foundation |
 | AI Runtime | Shared agent execution, context preparation, provider adapters and audit-ready result formatting | Foundation |
