@@ -119,7 +119,7 @@ const taxonomy = [
       },
       {
         name: "Containment",
-        subcategories: ["Cable Trays", "Cable Ladders", "Cable Trunking", "Conduits", "Flexible Conduits"],
+        subcategories: ["Cable Trays", "Cable Ladders", "Cable Trunking", "Conduits", "Flexible Conduits", "Junction Boxes"],
       },
       {
         name: "Cables & Termination",
@@ -431,6 +431,7 @@ const extraKeywordAliases = new Map<string, string[]>([
   ["Sub Distribution Boards", ["ldb", "pdb", "fdb", "distribution panel"]],
   ["Cable Trays", ["cable tray", "კაბელსატარი", "საკაბელო არხი", "лоток"]],
   ["Conduits", ["conduit", "pvc pipe electrical", "ელექტრო მილი"]],
+  ["Junction Boxes", ["junction box", "j-box", "j box", "გამანაწილებელი კოლოფი", "კოლოფი"]],
   ["Sockets", ["socket", "outlet", "როზეტი", "розетка"]],
   ["Switches", ["switch", "ჩამრთველი", "выключатель"]],
   ["Fire Alarm", ["fire alarm", "სახანძრო სიგნალიზაცია", "пожарная сигнализация"]],
@@ -511,6 +512,7 @@ const contextualSectionAliases = [
   { systemName: "Electrical", categoryName: "Panels & Distribution", subcategoryName: "Distribution Boards", aliases: ["გამანაწილებელი ფარები", "mdb", "mdbg", "ldb", "pdb", "fdb"] },
   { systemName: "Electrical", categoryName: "Cables & Termination", subcategoryName: "Power Cables", aliases: ["კაბელები", "power cables"] },
   { systemName: "Electrical", categoryName: "Containment", subcategoryName: "Cable Trays", aliases: ["საკაბელო კონსტრუქციები", "კაბელსატარი", "cable tray"] },
+  { systemName: "Electrical", categoryName: "Containment", subcategoryName: "Junction Boxes", aliases: ["junction box", "j-box", "j box", "გამანაწილებელი კოლოფი", "კოლოფი"] },
   { systemName: "Electrical", categoryName: "Small Power", subcategoryName: "Sockets", aliases: ["ფურნიტურა", "როზეტი"] },
   { systemName: "Electrical", categoryName: "Earthing & Protection", subcategoryName: "Earthing", aliases: ["დამიწება", "earthing"] },
   { systemName: "Electrical", categoryName: "Earthing & Protection", subcategoryName: "Lightning Protection", aliases: ["მეხამრიდი", "lightning protection"] },

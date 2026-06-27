@@ -43,6 +43,9 @@ export default async function ProjectBoqPage({ params }: { params: Promise<{ id:
           description="Review parsed BOQ rows, cleanup results, ignored rows and extracted source context."
           title="BOQ Review"
         >
+          <div className="mb-4 rounded-2xl border border-[#bbf7d0] bg-[#ecfdf3] px-4 py-3 text-sm font-medium text-[#0f3d2e]">
+            Review only the rows that need your attention. Confirm or correct categories before moving to Intelligence.
+          </div>
           <BoqResultsTable cleanupSummary={cleanupSummary} items={boqItems} learningRecords={learningRecords} showClassification={false} />
           {showBoqError ? (
             <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 font-mono text-xs text-red-800">

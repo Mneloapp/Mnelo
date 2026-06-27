@@ -62,3 +62,7 @@ Deliverable 2 introduced the first project-level processing pipeline foundation.
 ### Deliverable 4 — Project Workspace Information Architecture
 
 Deliverable 4 split Project Workspace into route-based sections to reduce information overload.
+
+### BOQ Review Taxonomy Update
+
+Added Junction Box taxonomy support and BOQ Review guidance.
