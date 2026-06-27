@@ -38,14 +38,19 @@ Legacy fields such as `user_corrected_category`, `user_corrected_subcategory`, `
 
 ## Matching Precedence During Reparse
 
-When a workbook is reparsed, Mnelo restores manual classifications before applying rules or AI.
+When a workbook is reparsed, Mnelo restores manual classifications before applying rules, inherited Excel context or AI. The reparse resolver must consume durable memory first; rules are only allowed to run when no durable or preserved manual match exists.
 
 Matching order:
 
-1. Strict fingerprint: sheet + row + normalized description + quantity + unit.
-2. Content fingerprint: normalized description + quantity + unit.
-3. Description and unit.
-4. Normalized description only when it is unique.
+1. Durable manual memory strict fingerprint: sheet + row + normalized description + quantity + unit.
+2. Durable manual memory content fingerprint: normalized description + quantity + unit.
+3. Durable manual memory description and unit.
+4. Durable manual memory normalized description only when it is unique.
+5. Current parsed row manual correction using the same matching order.
+6. Learned correction.
+7. Rules classifier.
+8. Weak Excel context as a system hint.
+9. Needs Review.
 
 If a match is found, Mnelo applies:
 
