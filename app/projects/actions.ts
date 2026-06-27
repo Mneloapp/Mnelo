@@ -1394,10 +1394,15 @@ async function updateBoqItemClassification({
       classification_confidence: classification.confidenceScore,
       classification_reason: classification.reason || null,
       classification_source: classificationSource,
-      classification_status: needsReview ? "needs_review" : "classified",
       needs_review: needsReview,
       takeoff_quantity: takeoffQuantity,
       takeoff_unit: takeoffUnit,
+    },
+    {
+      ...basePayload,
+      classification_reason: classification.reason || null,
+      classification_source: classificationSource,
+      needs_review: needsReview,
     },
     {
       ...legacyBasePayload,
