@@ -119,6 +119,7 @@ export type BoqItemRow = {
   amount?: number | null;
   category?: string | null;
   subcategory?: string | null;
+  classification_confidence?: number | null;
   confidence_score?: number | null;
   classification_reason?: string | null;
   classification_source?: string | null;
@@ -136,6 +137,7 @@ export type BoqItemRow = {
   sheet_name: string;
   row_number: number;
   created_at: string;
+  updated_at?: string | null;
 };
 
 export type ProjectsQueryResult = {
@@ -382,16 +384,20 @@ export function mapBoqItem(row: BoqItemRow): BoqItem {
     row.row_type === "ignored"
       ? row.row_type
       : "item";
-  const classificationSource =
+  const storedClassificationSource =
     row.classification_source === "ai" ||
     row.classification_source === "inherited_header" ||
     row.classification_source === "learned" ||
     row.classification_source === "rules" ||
     row.classification_source === "needs_review"
       ? row.classification_source
-      : row.category === NEEDS_REVIEW_SYSTEM
+      : null;
+  const classificationSource = isManualClassificationRow(row)
+    ? "learned"
+    : storedClassificationSource ||
+      (row.category === NEEDS_REVIEW_SYSTEM
         ? "needs_review"
-        : "rules";
+        : "rules");
 
   return {
     id: row.id,
@@ -405,7 +411,7 @@ export function mapBoqItem(row: BoqItemRow): BoqItem {
     category: row.category || "General",
     subcategory: row.subcategory || "Unclassified",
     classificationSubcategory: row.classification_subcategory || null,
-    confidenceScore: Number(row.confidence_score || 0),
+    confidenceScore: Number(row.classification_confidence ?? row.confidence_score ?? 0),
     classificationReason: row.classification_reason || null,
     classificationSource,
     cleanupReason: row.cleanup_reason || null,
@@ -443,6 +449,72 @@ function filterBoqRowsForExistingFiles(rows: BoqItemRow[], validFileIds: Set<str
 
     return Boolean(sourceFileId && validFileIds.has(sourceFileId));
   });
+}
+
+function isManualClassificationRow(row: BoqItemRow) {
+  if (row.classification_source === "learned") {
+    return true;
+  }
+
+  const confidenceScore = Number(row.classification_confidence ?? row.confidence_score ?? 0);
+  const reason = row.classification_reason?.toLowerCase() || "";
+
+  return Boolean(
+    row.category &&
+      row.subcategory &&
+      row.classification_subcategory &&
+      confidenceScore >= 1 &&
+      (reason.includes("manual") || reason.includes("user")),
+  );
+}
+
+function normalizeBoqDisplayKeyPart(value?: string | number | null) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function getBoqDisplayRowKey(row: BoqItemRow) {
+  const fileId = row.source_file_id || row.project_file_id || "project";
+  const sheetName = row.source_sheet_name || row.sheet_name || "sheet";
+  const rowNumber = row.source_row_number || row.row_number || "row";
+
+  return [
+    normalizeBoqDisplayKeyPart(fileId),
+    normalizeBoqDisplayKeyPart(sheetName),
+    normalizeBoqDisplayKeyPart(rowNumber),
+    normalizeBoqDisplayKeyPart(row.description),
+  ].join("|");
+}
+
+function getBoqDisplayRowPriority(row: BoqItemRow, validFileIds: Set<string>) {
+  const sourceFileId = row.source_file_id || row.project_file_id;
+  const linkedToCurrentFile = Boolean(sourceFileId && validFileIds.has(sourceFileId));
+  const updatedAt = Date.parse(row.updated_at || row.created_at || "");
+
+  return (
+    (isManualClassificationRow(row) ? 10_000 : 0) +
+    (row.classification_subcategory ? 1_000 : 0) +
+    (linkedToCurrentFile ? 100 : 0) +
+    (row.classification_source === "inherited_header" ? 25 : 0) +
+    (Number.isFinite(updatedAt) ? updatedAt / 1_000_000_000_000 : 0)
+  );
+}
+
+function dedupeBoqDisplayRows(rows: BoqItemRow[], validFileIds: Set<string>) {
+  const rowsByKey = new Map<string, BoqItemRow>();
+
+  for (const row of rows) {
+    const key = getBoqDisplayRowKey(row);
+    const current = rowsByKey.get(key);
+
+    if (!current || getBoqDisplayRowPriority(row, validFileIds) > getBoqDisplayRowPriority(current, validFileIds)) {
+      rowsByKey.set(key, row);
+    }
+  }
+
+  return Array.from(rowsByKey.values());
 }
 
 function chooseDisplayBoqRows(rows: BoqItemRow[], validFileIds: Set<string>) {
@@ -1007,7 +1079,7 @@ export async function getBoqItemsForCurrentUser(projectId: string) {
 
   const projectFiles = (filesResult.data || []) as ProjectFileRow[];
   const validFileIds = new Set(projectFiles.map((file) => file.id));
-  let rows = chooseDisplayBoqRows((boqResult.data || []) as BoqItemRow[], validFileIds);
+  let rows = dedupeBoqDisplayRows(chooseDisplayBoqRows((boqResult.data || []) as BoqItemRow[], validFileIds), validFileIds);
 
   if (rowsNeedStorageContextRepair(rows)) {
     rows = applyStorageExcelContext(rows, await buildStorageExcelContextMap({ files: projectFiles, supabase }));
@@ -1059,7 +1131,7 @@ export async function getProjectSystemsForCurrentUser(projectId: string) {
 
   const projectFiles = (filesResult.data || []) as ProjectFileRow[];
   const validFileIds = new Set(projectFiles.map((file) => file.id));
-  let rows = chooseDisplayBoqRows((boqResult.data || []) as BoqItemRow[], validFileIds);
+  let rows = dedupeBoqDisplayRows(chooseDisplayBoqRows((boqResult.data || []) as BoqItemRow[], validFileIds), validFileIds);
 
   if (rowsNeedStorageContextRepair(rows)) {
     rows = applyStorageExcelContext(rows, await buildStorageExcelContextMap({ files: projectFiles, supabase }));
@@ -1129,6 +1201,10 @@ export async function getProjectSystemsForCurrentUser(projectId: string) {
     const takeoffUnit = normalizeTakeoffUnit(row.takeoff_unit || item.unit);
     const systemItem = {
       ...item,
+      category: systemName,
+      classificationSubcategory:
+        subcategoryName && subcategoryName !== "Unclassified" ? subcategoryName : item.classificationSubcategory,
+      subcategory: categoryName,
       takeoffQuantity,
       takeoffUnit,
     } satisfies SystemBoqItem;
