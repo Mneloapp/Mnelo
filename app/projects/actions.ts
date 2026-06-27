@@ -1343,6 +1343,7 @@ async function getSystemReferenceMaps({
 async function updateBoqItemClassification({
   categoryId,
   classification,
+  requireClassificationSubcategory = false,
   row,
   supabase,
   systemId,
@@ -1351,6 +1352,7 @@ async function updateBoqItemClassification({
   categoryId?: string;
   classification: SystemClassification;
   needsReviewOverride?: boolean;
+  requireClassificationSubcategory?: boolean;
   row: BoqClassificationRow;
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
   systemId?: string;
@@ -1414,13 +1416,32 @@ async function updateBoqItemClassification({
       category: classification.systemName,
       subcategory: classification.categoryName,
     },
-  ];
+  ].filter((payload) => !requireClassificationSubcategory || "classification_subcategory" in payload);
   let lastError: string | null = null;
 
   for (const payload of updateAttempts) {
     const { error } = await supabase.from("boq_items").update(payload).eq("id", row.id);
 
     if (!error) {
+      if (requireClassificationSubcategory) {
+        const { data: verificationRow, error: verificationError } = await supabase
+          .from("boq_items")
+          .select("classification_subcategory")
+          .eq("id", row.id)
+          .maybeSingle();
+
+        if (verificationError) {
+          return verificationError.message;
+        }
+
+        const savedSubcategory = (verificationRow as { classification_subcategory?: string | null } | null)
+          ?.classification_subcategory;
+
+        if (savedSubcategory !== classification.subcategoryName) {
+          return "Manual subcategory was not persisted. Check that boq_items.classification_subcategory exists in Supabase.";
+        }
+      }
+
       return null;
     }
 
@@ -1846,6 +1867,7 @@ export async function correctBoqItemSystemClassification(formData: FormData) {
       categoryId,
       classification,
       needsReviewOverride: needsReview,
+      requireClassificationSubcategory: true,
       row: row as BoqClassificationRow,
       supabase,
       systemId,
@@ -2051,6 +2073,7 @@ export async function bulkCorrectBoqItemClassifications(formData: FormData) {
             categoryId,
             classification,
             needsReviewOverride: change?.needsReview ?? false,
+            requireClassificationSubcategory: Boolean(classification.subcategoryName),
             row,
             supabase,
             systemId,
