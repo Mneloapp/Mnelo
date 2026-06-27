@@ -61,12 +61,16 @@ function draftForItem(item: SystemBoqItem, systemName: string, categoryName: str
   return {
     categoryName,
     needsReview: item.needsReview,
-    subcategoryName: item.classificationSubcategory,
+    subcategoryName: item.classificationSubcategory || getDefaultSubcategory(systemName, categoryName),
     systemName,
   };
 }
 
 function displaySubcategory(item: SystemBoqItem) {
+  if (item.classificationSource === "learned" && item.classificationSubcategory) {
+    return item.classificationSubcategory;
+  }
+
   return (
     item.inheritedSubcategory ||
     item.subcategory ||

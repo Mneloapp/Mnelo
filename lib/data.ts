@@ -1111,15 +1111,17 @@ export async function getProjectSystemsForCurrentUser(projectId: string) {
     const systemName = hasManualSystem
       ? item.category
       : excelClassification?.systemName || firstMeaningfulValue(item.category) || classification.systemName || NEEDS_REVIEW_SYSTEM;
-    const categoryName =
-      firstMeaningfulValue(
-        item.inheritedCategory,
-        item.sectionHeader,
-        item.subcategory,
-        systemName && systemName !== NEEDS_REVIEW_SYSTEM ? `${systemName} Equipment` : null,
-      ) || "Unclassified";
-    const subcategoryName =
-      firstMeaningfulValue(item.inheritedSubcategory, item.subcategory, item.sectionHeader, item.category) || "Unclassified";
+    const categoryName = hasManualSystem
+      ? firstMeaningfulValue(item.subcategory, classification.categoryName, item.inheritedCategory, item.sectionHeader) || "Unclassified"
+      : firstMeaningfulValue(
+          item.inheritedCategory,
+          item.sectionHeader,
+          item.subcategory,
+          systemName && systemName !== NEEDS_REVIEW_SYSTEM ? `${systemName} Equipment` : null,
+        ) || "Unclassified";
+    const subcategoryName = hasManualSystem
+      ? firstMeaningfulValue(item.classificationSubcategory, classification.subcategoryName, item.subcategory) || "Unclassified"
+      : firstMeaningfulValue(item.inheritedSubcategory, item.subcategory, item.sectionHeader, item.category) || "Unclassified";
     const takeoffQuantity =
       row.takeoff_quantity === null || row.takeoff_quantity === undefined
         ? item.quantity
