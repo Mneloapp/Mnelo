@@ -1,0 +1,54 @@
+# Sprint 1 — Project Intelligence Engine
+
+## Mission
+
+Transform uploaded project documents into structured, explainable and reusable knowledge.
+
+## Business Goal
+
+Users upload an entire tender package. Mnelo understands the project. It creates structured project knowledge.
+
+## Success Metrics
+
+| Metric | Target |
+| --- | --- |
+| Document classification | 95%+ |
+| BOQ entity extraction | 90%+ |
+| Document retention | No lost documents |
+| Low-confidence handling | Review Queue for low confidence |
+
+## Included
+
+- Project Workspace
+- Upload Engine
+- Document Intelligence Agent
+- Entity Extraction
+- Review Queue
+- Knowledge Engine
+
+## Excluded
+
+- Supplier Database
+- Marketplace
+- RFQ
+- Quote Comparison
+- Purchase Orders
+- Payments
+- Negotiation
+
+## Implementation Order
+
+1. Database Schema
+2. Processing Queue
+3. Upload Engine
+4. Document Intelligence Agent
+5. Entity Extraction
+6. Review Queue
+7. Knowledge Engine
+8. Dashboard
+9. Testing
+10. Refactoring
+
+## Delivery Notes
+
+Sprint 1 must prioritize correctness, traceability and reviewability over automation. The output should create the foundation for RFQ automation, supplier intelligence and quote comparison.
