@@ -101,11 +101,26 @@ type BoqClassificationRow = {
   inherited_subcategory?: string | null;
   needs_review?: boolean | null;
   project_file_id?: string | null;
+  row_number?: number | null;
   row_type?: BoqRowType | null;
   section_header?: string | null;
+  sheet_name?: string | null;
   source_file_id?: string | null;
   source_row_number?: number | null;
   source_sheet_name?: string | null;
+};
+
+type PreservedManualClassification = {
+  category: string;
+  classificationReason: string | null;
+  classificationSubcategory: string | null;
+  confidenceScore: number;
+  description: string;
+  quantity: number | null;
+  rowNumber: number | null;
+  sheetName: string | null;
+  subcategory: string;
+  unit: string | null;
 };
 
 type LearnedClassification = {
@@ -167,10 +182,96 @@ function getFileExtension(fileName: string) {
   return index >= 0 ? fileName.slice(index).toLowerCase() : "";
 }
 
+function normalizeFingerprintText(value?: string | number | null) {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s./&-]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeFingerprintQuantity(value?: number | null) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return "";
+  }
+
+  return Number(value).toFixed(4).replace(/\.?0+$/, "");
+}
+
+function boqRowStrictFingerprint(row: {
+  description: string;
+  quantity?: number | null;
+  rowNumber?: number | null;
+  sheetName?: string | null;
+  unit?: string | null;
+}) {
+  return [
+    normalizeFingerprintText(row.sheetName),
+    normalizeFingerprintText(row.rowNumber),
+    normalizeFingerprintText(row.description),
+    normalizeFingerprintQuantity(row.quantity),
+    normalizeFingerprintText(row.unit),
+  ].join("|");
+}
+
+function boqRowContentFingerprint(row: { description: string; quantity?: number | null; unit?: string | null }) {
+  return [
+    normalizeFingerprintText(row.description),
+    normalizeFingerprintQuantity(row.quantity),
+    normalizeFingerprintText(row.unit),
+  ].join("|");
+}
+
+function buildPreservedManualClassificationMaps(preserved: PreservedManualClassification[]) {
+  const strict = new Map<string, PreservedManualClassification>();
+  const content = new Map<string, PreservedManualClassification>();
+
+  for (const classification of preserved) {
+    strict.set(boqRowStrictFingerprint(classification), classification);
+    content.set(boqRowContentFingerprint(classification), classification);
+  }
+
+  return { content, strict };
+}
+
+function findPreservedManualClassification(
+  row: ParsedBoqRow,
+  maps: ReturnType<typeof buildPreservedManualClassificationMaps>,
+) {
+  const fingerprintRow = {
+    description: row.description,
+    quantity: row.quantity,
+    rowNumber: row.source_row_number || row.row_number,
+    sheetName: row.source_sheet_name || row.sheet_name,
+    unit: row.unit,
+  };
+
+  return maps.strict.get(boqRowStrictFingerprint(fingerprintRow)) || maps.content.get(boqRowContentFingerprint(fingerprintRow)) || null;
+}
+
 function predictClassification(
-  row: Pick<ParsedBoqRow, "description" | "section_header" | "sheet_name">,
+  row: ParsedBoqRow,
   learnedClassifications: LearnedClassification[] = [],
+  preservedManualClassifications: ReturnType<typeof buildPreservedManualClassificationMaps> | null = null,
 ): ClassificationPrediction {
+  const preservedManualClassification = preservedManualClassifications
+    ? findPreservedManualClassification(row, preservedManualClassifications)
+    : null;
+
+  if (preservedManualClassification) {
+    return {
+      classification_reason:
+        preservedManualClassification.classificationReason || "Preserved manual correction during reparse.",
+      classification_source: "learned",
+      confidence_score: preservedManualClassification.confidenceScore || 1,
+      needs_review: false,
+      predicted_category: preservedManualClassification.category,
+      predicted_classification_subcategory: preservedManualClassification.classificationSubcategory,
+      predicted_subcategory: preservedManualClassification.subcategory,
+      predicted_supplier_type: "User corrected supplier",
+    };
+  }
+
   const learnedClassification = findLearnedClassification(row.description, learnedClassifications);
 
   if (learnedClassification) {
@@ -402,6 +503,85 @@ async function getLearnedClassifications(
   return (data || []) as LearnedClassification[];
 }
 
+function isManualBoqClassification(row: BoqClassificationRow) {
+  const reason = row.classification_reason?.toLowerCase() || "";
+  const confidenceScore = Number(row.classification_confidence || 0);
+
+  return Boolean(
+    row.classification_source === "learned" ||
+      (row.category &&
+        row.subcategory &&
+        row.classification_subcategory &&
+        confidenceScore >= 1 &&
+        (reason.includes("manual") || reason.includes("user"))),
+  );
+}
+
+async function getPreservedManualClassificationsForProject({
+  projectId,
+  supabase,
+  userId,
+}: {
+  projectId: string;
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+  userId: string;
+}) {
+  const selectAttempts = [
+    "id, description, quantity, unit, category, subcategory, classification_subcategory, classification_confidence, classification_reason, classification_source, needs_review, row_type, sheet_name, row_number, source_sheet_name, source_row_number",
+    "id, description, quantity, unit, category, subcategory, classification_subcategory, classification_confidence, classification_reason, classification_source, row_type, sheet_name, row_number",
+    "id, description, quantity, unit, category, subcategory, classification_subcategory, classification_reason, classification_source, sheet_name, row_number",
+    "id, description, quantity, unit, category, subcategory, classification_subcategory, classification_source",
+  ];
+  let rows: unknown[] = [];
+
+  for (const selectColumns of selectAttempts) {
+    const result = await supabase
+      .from("boq_items")
+      .select(selectColumns)
+      .eq("project_id", projectId)
+      .eq("user_id", userId);
+
+    if (!result.error) {
+      rows = result.data || [];
+      break;
+    }
+
+    if (
+      !result.error.message.includes("schema cache") &&
+      !result.error.message.includes("classification_subcategory") &&
+      !result.error.message.includes("classification_confidence") &&
+      !result.error.message.includes("classification_reason") &&
+      !result.error.message.includes("classification_source") &&
+      !result.error.message.includes("source_sheet_name") &&
+      !result.error.message.includes("source_row_number") &&
+      !result.error.message.includes("row_type")
+    ) {
+      console.error(`Failed reading manual BOQ classifications before reparse: ${result.error.message}`);
+      break;
+    }
+  }
+
+  return ((rows || []) as BoqClassificationRow[])
+    .filter((row) => (!row.row_type || row.row_type === "item") && isManualBoqClassification(row))
+    .map((row) => ({
+      category: row.category || NEEDS_REVIEW_SYSTEM,
+      classificationReason: row.classification_reason || "Preserved manual correction during reparse.",
+      classificationSubcategory: row.classification_subcategory || null,
+      confidenceScore: Number(row.classification_confidence || 1),
+      description: row.description,
+      quantity: row.quantity === null || row.quantity === undefined ? null : Number(row.quantity || 0),
+      rowNumber:
+        row.source_row_number === null || row.source_row_number === undefined
+          ? row.row_number === null || row.row_number === undefined
+            ? null
+            : Number(row.row_number)
+          : Number(row.source_row_number),
+      sheetName: row.source_sheet_name || row.sheet_name || null,
+      subcategory: row.subcategory || NEEDS_REVIEW_CATEGORY,
+      unit: row.unit || null,
+    })) satisfies PreservedManualClassification[];
+}
+
 async function getAuthenticatedUser() {
   const supabase = await createSupabaseServerClient();
   const {
@@ -438,12 +618,14 @@ async function getProjectColumnMapping(
 }
 
 async function saveParsedBoqRows({
+  preservedManualClassifications = [],
   projectFileId,
   projectId,
   rows,
   supabase,
   userId,
 }: {
+  preservedManualClassifications?: PreservedManualClassification[];
   projectFileId: string;
   projectId: string;
   rows: ParsedBoqRow[];
@@ -453,6 +635,7 @@ async function saveParsedBoqRows({
   const normalizedRows = normalizeParsedBoqRowsShared(rows);
   const parserSummary = getBoqParserSummary(normalizedRows);
   const learnedClassifications = await getLearnedClassifications(supabase, userId);
+  const preservedManualClassificationMaps = buildPreservedManualClassificationMaps(preservedManualClassifications);
   logBoqParserDebugSummary(projectId, normalizedRows);
   const buildBoqRows = ({ fileColumns, optionalColumns }: BoqInsertMode) => {
     const includesContextColumns =
@@ -473,7 +656,7 @@ async function saveParsedBoqRows({
       const rowType = row.row_type || "item";
       const prediction =
         rowType === "item"
-          ? predictClassification(row, learnedClassifications)
+          ? predictClassification(row, learnedClassifications, preservedManualClassificationMaps)
           : ({
               classification_reason: row.cleanup_reason || "Cleanup marked this row as non-item.",
               classification_source: "needs_review",
@@ -656,7 +839,7 @@ async function saveParsedBoqRows({
 
   const { error: learningError } = await supabase.from("ai_training_data").insert(
     itemRows.map((row) => {
-      const prediction = predictClassification(row, learnedClassifications);
+      const prediction = predictClassification(row, learnedClassifications, preservedManualClassificationMaps);
 
       return {
         project_id: projectId,
@@ -832,14 +1015,6 @@ async function deleteParsedBoqRowsForFile({
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
   userId: string;
 }) {
-  const { error: projectDeleteError } = await supabase.from("boq_items").delete().eq("project_id", projectId).eq("user_id", userId);
-
-  if (!projectDeleteError) {
-    return;
-  }
-
-  console.info(`[boq-parse] project-level BOQ cleanup failed, falling back to file cleanup: ${projectDeleteError.message}`);
-
   const deleteAttempts = [
     () =>
       supabase
@@ -1124,6 +1299,12 @@ export async function saveBoqColumnMappingAndParse(formData: FormData) {
     return actionError(error, "Excel parsing failed with the selected mapping.");
   }
 
+  const preservedManualClassifications = await getPreservedManualClassificationsForProject({
+    projectId,
+    supabase,
+    userId: user.id,
+  });
+
   await deleteParsedBoqRowsForFile({
     projectFileId,
     projectId,
@@ -1132,6 +1313,7 @@ export async function saveBoqColumnMappingAndParse(formData: FormData) {
   });
 
   const saveResult = await saveParsedBoqRows({
+    preservedManualClassifications,
     projectFileId,
     projectId,
     rows,
@@ -1217,6 +1399,12 @@ export async function parseExistingProjectFile(formData: FormData) {
     return actionError(error, "Excel parsing failed.");
   }
 
+  const preservedManualClassifications = await getPreservedManualClassificationsForProject({
+    projectId,
+    supabase,
+    userId: user.id,
+  });
+
   await deleteParsedBoqRowsForFile({
     projectFileId,
     projectId,
@@ -1225,6 +1413,7 @@ export async function parseExistingProjectFile(formData: FormData) {
   });
 
   const saveResult = await saveParsedBoqRows({
+    preservedManualClassifications,
     projectFileId,
     projectId,
     rows,
