@@ -58,3 +58,7 @@ Sprint 1 must prioritize correctness, traceability and reviewability over automa
 ### Deliverable 2 — Processing Pipeline Foundation
 
 Deliverable 2 introduced the first project-level processing pipeline foundation. The Project Workspace can now display document processing items with status, stage, confidence, errors and timestamp. Until dedicated processing job records exist, the pipeline view is safely derived from existing uploaded project files and parsed BOQ state.
+
+### Deliverable 4 — Project Workspace Information Architecture
+
+Deliverable 4 split Project Workspace into route-based sections to reduce information overload.
