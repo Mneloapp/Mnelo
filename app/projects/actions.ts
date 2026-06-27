@@ -188,7 +188,11 @@ function predictClassification(
 
   const inheritedClassification = inferClassificationFromExcelContext(row.sheet_name, row.section_header);
   const classification = inheritedClassification || classifyBoqSystem(row.description);
-  const needsReview = classification.systemName === NEEDS_REVIEW_SYSTEM;
+  const needsReview =
+    classification.systemName === NEEDS_REVIEW_SYSTEM ||
+    classification.categoryName === NEEDS_REVIEW_CATEGORY ||
+    !classification.subcategoryName ||
+    classification.confidenceScore < 0.7;
 
   return {
     classification_reason:
@@ -1360,7 +1364,11 @@ async function updateBoqItemClassification({
     classification.source || (classification.systemName === NEEDS_REVIEW_SYSTEM ? "needs_review" : "rules");
   const needsReview =
     needsReviewOverride ??
-    (classification.systemName === NEEDS_REVIEW_SYSTEM || classificationSource === "needs_review");
+    (classification.systemName === NEEDS_REVIEW_SYSTEM ||
+      classification.categoryName === NEEDS_REVIEW_CATEGORY ||
+      !classification.subcategoryName ||
+      classification.confidenceScore < 0.7 ||
+      classificationSource === "needs_review");
   const basePayload = {
     category: classification.systemName,
     classification_subcategory: classification.subcategoryName || null,
