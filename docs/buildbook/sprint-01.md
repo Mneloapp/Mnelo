@@ -94,3 +94,5 @@ MES-009 introduced Requirement Views Architecture and established one Requiremen
 MES-010 introduced Procurement Package Architecture and established Packages as dynamic commercial workflow objects built on stable Requirements.
 
 Design Order #001 introduced a UI prototype for Requirement Workspace using existing BOQ data as source evidence.
+
+Manual classification UX was improved and Apply to Similar Items was made review-first and conservative.

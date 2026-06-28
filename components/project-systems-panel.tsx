@@ -15,13 +15,12 @@ import {
 import { bulkCorrectBoqItemClassifications, classifyProjectBoqItems } from "@/app/projects/actions";
 import {
   getCategoryOptions,
-  getDefaultCategory,
-  getDefaultSubcategory,
   getSubcategoryOptions,
   getSystemRuleOptions,
   NEEDS_REVIEW_CATEGORY,
   NEEDS_REVIEW_SYSTEM,
 } from "@/lib/classification";
+import { getSimilarItemMatch, type SimilarItemMatch } from "@/lib/classification/similar-items";
 import type { ProjectSystemCategory, ProjectSystemSummary, SystemBoqItem } from "@/lib/data";
 import { EmptyState, ErrorMessage } from "@/components/ui";
 
@@ -42,16 +41,16 @@ type FlatSystemRow = {
   system: ProjectSystemSummary;
 };
 
-function defaultCategoryForSystem(systemName: string) {
-  return getDefaultCategory(systemName) || NEEDS_REVIEW_CATEGORY;
-}
+type SimilarCandidate = FlatSystemRow & {
+  match: SimilarItemMatch;
+};
 
 function defaultSubcategoryForDraft(systemName: string, categoryName: string) {
   if (categoryName === NEEDS_REVIEW_CATEGORY || systemName === NEEDS_REVIEW_SYSTEM) {
     return null;
   }
 
-  return getDefaultSubcategory(systemName, categoryName);
+  return null;
 }
 
 function categoryOptionsForSystem(systemName: string) {
@@ -248,6 +247,14 @@ export function SubcategoryPicker({
 }) {
   const options = getSubcategoryOptions(systemName, categoryName);
 
+  if (categoryName === NEEDS_REVIEW_CATEGORY || options.length === 0) {
+    return (
+      <div className="rounded-2xl border border-dashed border-[#cbd5e1] bg-[#f8fafc] p-4 text-sm leading-6 text-[#64748b]">
+        Choose a category first. Mnelo will not auto-select the first subcategory for you.
+      </div>
+    );
+  }
+
   return (
     <div className="grid gap-2">
       <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#64748b]">Choose subcategory</p>
@@ -362,11 +369,12 @@ export function ClassificationReview({
         </div>
         <button
           className="inline-flex h-10 items-center justify-center rounded-[14px] bg-[#f5f3ff] px-4 text-sm font-semibold text-[#6d28d9] ring-1 ring-[#ddd6fe] transition hover:bg-[#ede9fe]"
+          disabled={similarCount === 0}
           onClick={onSelectSimilar}
           type="button"
         >
           <Brain aria-hidden="true" className="mr-2 h-4 w-4" strokeWidth={2} />
-          Apply to similar items ({similarCount})
+          Review similar items ({similarCount})
         </button>
       </div>
 
@@ -379,6 +387,9 @@ export function ClassificationReview({
               <span className="rounded-full bg-white px-2.5 py-1 font-semibold ring-1 ring-[#e5e7eb]">Current: {system.name}</span>
               <span className="rounded-full bg-white px-2.5 py-1 font-semibold ring-1 ring-[#e5e7eb]">
                 Group: {category.name}
+              </span>
+              <span className="rounded-full bg-white px-2.5 py-1 font-semibold ring-1 ring-[#e5e7eb]">
+                Saved subcategory: {displaySubcategory(item)}
               </span>
               {item.sourceSheetName ? (
                 <span className="rounded-full bg-white px-2.5 py-1 font-semibold ring-1 ring-[#e5e7eb]">
@@ -413,10 +424,9 @@ export function ClassificationReview({
                         }`}
                         key={option.systemName}
                         onClick={() => {
-                          const nextCategory = defaultCategoryForSystem(option.systemName);
                           onChangeDraft({
-                            categoryName: nextCategory,
-                            subcategoryName: defaultSubcategoryForDraft(option.systemName, nextCategory),
+                            categoryName: NEEDS_REVIEW_CATEGORY,
+                            subcategoryName: null,
                             systemName: option.systemName,
                           });
                         }}
@@ -433,7 +443,7 @@ export function ClassificationReview({
                 onChange={(nextCategory) =>
                   onChangeDraft({
                     categoryName: nextCategory,
-                    subcategoryName: defaultSubcategoryForDraft(draft.systemName, nextCategory),
+                    subcategoryName: null,
                   })
                 }
                 systemName={draft.systemName}
@@ -504,11 +514,13 @@ export function ProjectSystemsPanel({
 }) {
   const router = useRouter();
   const [isClassifying, setIsClassifying] = useState(false);
-  const [isConfirming, setIsConfirming] = useState(false);
+  const [isSavingBulk, setIsSavingBulk] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, DraftChange>>({});
+  const [selectedSimilarIds, setSelectedSimilarIds] = useState<string[]>([]);
   const [savedOverrides, setSavedOverrides] = useState<Record<string, DraftChange>>({});
+  const [showSimilarReview, setShowSimilarReview] = useState(false);
   const [notice, setNotice] = useState<{ tone: "success" | "error"; message: string } | null>(null);
   const [systemFilter, setSystemFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
@@ -638,11 +650,11 @@ export function ProjectSystemsPanel({
     return filteredRows[index + 1] || filteredRows[index] || filteredRows[0] || null;
   }
 
-  async function saveDrafts(itemIds: string[], successMessage: string, continueAfterSave = false) {
+  async function saveDrafts(itemIds: string[], successMessage: string, continueAfterSave = false, forcedDraft?: DraftChange) {
     const changes = itemIds
       .map((itemId) => {
         const row = originalById.get(itemId);
-        const draft = row ? displayDraft(row) : drafts[itemId];
+        const draft = forcedDraft || (row ? displayDraft(row) : drafts[itemId]);
 
         if (!draft) {
           return null;
@@ -709,27 +721,40 @@ export function ProjectSystemsPanel({
     }
   }
 
-  async function confirmVisibleAsCorrect() {
-    if (filteredRows.length === 0 || isConfirming) {
+  async function saveUnsavedDrafts() {
+    const itemIds = Object.keys(drafts);
+
+    if (itemIds.length === 0 || isSavingBulk) {
       return;
     }
 
-    setIsConfirming(true);
+    setIsSavingBulk(true);
     setNotice(null);
 
     try {
       await saveDrafts(
-        filteredRows.map((row) => row.item.id),
-        `Classification saved. AI memory updated for ${filteredRows.length.toLocaleString()} visible items.`,
+        itemIds,
+        `Classification saved. AI memory updated for ${itemIds.length.toLocaleString()} edited item${itemIds.length === 1 ? "" : "s"}.`,
       );
     } finally {
-      setIsConfirming(false);
+      setIsSavingBulk(false);
     }
   }
 
-  const similarRows = focusedRow
-    ? filteredRows.filter((row) => row.item.id !== focusedRow.item.id && displaySubcategory(row.item) === displaySubcategory(focusedRow.item))
-    : [];
+  const similarCandidates = useMemo(() => {
+    if (!focusedRow) {
+      return [];
+    }
+
+    return filteredRows
+      .filter((row) => row.item.id !== focusedRow.item.id)
+      .map((row) => ({
+        ...row,
+        match: getSimilarItemMatch(focusedRow.item.description, row.item.description),
+      }))
+      .filter((row): row is SimilarCandidate => row.match.isSimilar)
+      .sort((left, right) => right.match.score - left.match.score || left.item.description.localeCompare(right.item.description));
+  }, [filteredRows, focusedRow]);
 
   return (
     <section className="rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-[0_18px_50px_rgba(15,23,42,0.04)]">
@@ -901,34 +926,122 @@ export function ProjectSystemsPanel({
             isSaving={isSaving}
             item={focusedRow.item}
             onApprove={() => {
-              updateDraft(focusedRow.item.id, { needsReview: false });
-              void saveDrafts([focusedRow.item.id], "Classification saved. AI memory updated.", true);
+              const approvedDraft = normalizeDraftChange({ ...displayDraft(focusedRow), needsReview: false });
+              updateDraft(focusedRow.item.id, approvedDraft);
+              void saveDrafts([focusedRow.item.id], "Classification saved. AI memory updated.", true, approvedDraft);
             }}
             onChangeDraft={(patch) => updateDraft(focusedRow.item.id, patch)}
             onMarkNeedsReview={() => {
-              updateDraft(focusedRow.item.id, { needsReview: true });
-              void saveDrafts([focusedRow.item.id], "Classification saved. This item remains in review.");
+              const reviewDraft = { ...displayDraft(focusedRow), needsReview: true };
+              updateDraft(focusedRow.item.id, reviewDraft);
+              void saveDrafts([focusedRow.item.id], "Classification saved. This item remains in review.", false, reviewDraft);
             }}
             onSave={() => void saveDrafts([focusedRow.item.id], "Classification saved. AI memory updated.")}
             onSelectSimilar={() => {
-              if (similarRows.length === 0) {
+              if (similarCandidates.length === 0) {
                 setNotice({ tone: "success", message: "No similar visible items found for this selection." });
                 return;
               }
 
-              const draft = displayDraft(focusedRow);
-              setDrafts((previous) => ({
-                ...previous,
-                ...Object.fromEntries(similarRows.map((row) => [row.item.id, draft])),
-              }));
-              setNotice({
-                tone: "success",
-                message: `Prepared ${similarRows.length.toLocaleString()} similar visible items. Click Save Changes on each review or confirm visible as correct.`,
-              });
+              setSelectedSimilarIds([]);
+              setShowSimilarReview(true);
             }}
-            similarCount={similarRows.length}
+            similarCount={similarCandidates.length}
             system={focusedRow.system}
           />
+
+          {showSimilarReview ? (
+            <div className="rounded-[20px] border border-[#ddd6fe] bg-[#faf5ff] p-5 xl:col-start-1">
+              <div className="flex flex-col gap-3 border-b border-[#ddd6fe] pb-4 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#7c3aed]">Review similar items</p>
+                  <h3 className="mt-2 text-lg font-semibold text-[#0f172a]">Select only the rows that should receive this correction.</h3>
+                  <p className="mt-1 text-sm leading-6 text-[#64748b]">
+                    Candidates are unchecked by default. Same system or category is not enough; Mnelo only suggests strong product identity matches.
+                  </p>
+                </div>
+                <button
+                  className="rounded-[14px] bg-white px-4 py-2 text-sm font-semibold text-[#64748b] ring-1 ring-[#ddd6fe] transition hover:bg-[#f8fafc]"
+                  onClick={() => {
+                    setSelectedSimilarIds([]);
+                    setShowSimilarReview(false);
+                  }}
+                  type="button"
+                >
+                  Cancel
+                </button>
+              </div>
+
+              <div className="mt-4 rounded-2xl border border-[#e5e7eb] bg-white p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#94a3b8]">Source item</p>
+                <p className="mt-2 text-sm font-semibold leading-6 text-[#0f172a]">{focusedRow.item.description}</p>
+              </div>
+
+              <div className="mt-4 grid max-h-[420px] gap-3 overflow-y-auto pr-1">
+                {similarCandidates.map((candidate) => {
+                  const selected = selectedSimilarIds.includes(candidate.item.id);
+
+                  return (
+                    <label
+                      className={`grid cursor-pointer gap-3 rounded-2xl border p-4 transition ${
+                        selected ? "border-[#7c3aed] bg-white" : "border-[#e5e7eb] bg-white/80 hover:border-[#c4b5fd]"
+                      }`}
+                      key={candidate.item.id}
+                    >
+                      <div className="flex items-start gap-3">
+                        <input
+                          checked={selected}
+                          className="mt-1 h-4 w-4 rounded border-[#cbd5e1] text-[#7c3aed] focus:ring-[#7c3aed]"
+                          onChange={(event) => {
+                            const checked = event.currentTarget.checked;
+                            setSelectedSimilarIds((previous) =>
+                              checked
+                                ? Array.from(new Set([...previous, candidate.item.id]))
+                                : previous.filter((itemId) => itemId !== candidate.item.id),
+                            );
+                          }}
+                          type="checkbox"
+                        />
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold leading-6 text-[#0f172a]">{candidate.item.description}</p>
+                          <p className="mt-1 text-xs font-medium text-[#64748b]">
+                            {candidate.system.name} / {candidate.category.name} / {displaySubcategory(candidate.item)}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="rounded-xl bg-[#f8fafc] px-3 py-2 text-xs font-medium text-[#64748b]">
+                        Why suggested: {candidate.match.reason}
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+
+              <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm text-[#64748b]">
+                  {selectedSimilarIds.length.toLocaleString()} selected. Saved rows stay editable after this action.
+                </p>
+                <button
+                  className="inline-flex h-11 items-center justify-center rounded-[14px] bg-[#16a34a] px-5 text-sm font-semibold text-white shadow-[0_14px_32px_rgba(22,163,74,0.22)] transition hover:bg-[#087a36] disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={selectedSimilarIds.length === 0 || isSaving}
+                  onClick={() => {
+                    const draft = displayDraft(focusedRow);
+                    void saveDrafts(
+                      selectedSimilarIds,
+                      `Classification saved. AI memory updated for ${selectedSimilarIds.length.toLocaleString()} selected similar item${selectedSimilarIds.length === 1 ? "" : "s"}.`,
+                      false,
+                      draft,
+                    );
+                    setShowSimilarReview(false);
+                    setSelectedSimilarIds([]);
+                  }}
+                  type="button"
+                >
+                  {isSaving ? "Saving..." : "Save selected corrections"}
+                </button>
+              </div>
+            </div>
+          ) : null}
 
           <aside className="rounded-[20px] border border-[#e5e7eb] bg-[#fbfdfb] p-4">
             <div className="flex items-center justify-between gap-3">
@@ -938,11 +1051,11 @@ export function ProjectSystemsPanel({
               </div>
               <button
                 className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-[#087a36] ring-1 ring-[#bbf7d0] transition hover:bg-[#ecfdf3] disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={filteredRows.length === 0 || isConfirming}
-                onClick={() => void confirmVisibleAsCorrect()}
+                disabled={dirtyCount === 0 || isSavingBulk}
+                onClick={() => void saveUnsavedDrafts()}
                 type="button"
               >
-                {isConfirming ? "Saving..." : "Confirm visible"}
+                {isSavingBulk ? "Saving..." : dirtyCount > 0 ? `Save unsaved (${dirtyCount})` : "No unsaved rows"}
               </button>
             </div>
             <div className="mt-4 grid max-h-[720px] gap-2 overflow-y-auto pr-1">
