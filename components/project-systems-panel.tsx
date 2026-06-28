@@ -95,6 +95,24 @@ function displaySubcategory(item: SystemBoqItem) {
   );
 }
 
+function hasCompleteDraftClassification(draft: Pick<DraftChange, "categoryName" | "subcategoryName" | "systemName">) {
+  return Boolean(
+    draft.systemName &&
+      draft.systemName !== NEEDS_REVIEW_SYSTEM &&
+      draft.categoryName &&
+      draft.categoryName !== NEEDS_REVIEW_CATEGORY &&
+      draft.subcategoryName,
+  );
+}
+
+function normalizeDraftChange(draft: DraftChange): DraftChange {
+  return hasCompleteDraftClassification(draft) ? { ...draft, needsReview: false } : draft;
+}
+
+function patchChangesClassification(patch: Partial<DraftChange>) {
+  return "systemName" in patch || "categoryName" in patch || "subcategoryName" in patch;
+}
+
 export function ProjectSystemsPanel({
   projectId,
   systems,
@@ -231,7 +249,8 @@ export function ProjectSystemsPanel({
     }
 
     const current = displayDraft(row);
-    const next = { ...current, ...patch };
+    const nextDraft = { ...current, ...patch };
+    const next = patchChangesClassification(patch) ? normalizeDraftChange(nextDraft) : nextDraft;
 
     setDrafts((previous) => ({
       ...previous,
@@ -249,7 +268,8 @@ export function ProjectSystemsPanel({
 
       for (const row of rows) {
         const current = next[row.item.id] || savedOverrides[row.item.id] || draftForItem(row.item, row.system.name, row.category.name);
-        next[row.item.id] = { ...current, ...patch };
+        const nextDraft = { ...current, ...patch };
+        next[row.item.id] = patchChangesClassification(patch) ? normalizeDraftChange(nextDraft) : nextDraft;
       }
 
       return next;

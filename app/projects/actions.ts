@@ -2279,13 +2279,33 @@ async function updateBoqItemClassification({
   const classificationSource =
     classification.source || (classification.systemName === NEEDS_REVIEW_SYSTEM ? "needs_review" : "rules");
   const isUserCorrection = classificationSource === "user" || classificationSource === "learned";
+  const hasCompleteClassification = Boolean(
+    classification.systemName !== NEEDS_REVIEW_SYSTEM &&
+      classification.categoryName !== NEEDS_REVIEW_CATEGORY &&
+      classification.subcategoryName &&
+      isValidSystem(classification.systemName) &&
+      isValidCategory(classification.systemName, classification.categoryName) &&
+      isValidSubcategory(classification.systemName, classification.categoryName, classification.subcategoryName),
+  );
+  const existingSystemName = row.classification_system || row.category || null;
+  const existingCategoryName = row.classification_category || row.subcategory || null;
+  const existingSubcategoryName = row.classification_subcategory || null;
+  const explicitNeedsReviewOnly =
+    needsReviewOverride === true &&
+    existingSystemName === classification.systemName &&
+    existingCategoryName === classification.categoryName &&
+    existingSubcategoryName === (classification.subcategoryName || null);
   const needsReview =
-    needsReviewOverride ??
-    (classification.systemName === NEEDS_REVIEW_SYSTEM ||
-      classification.categoryName === NEEDS_REVIEW_CATEGORY ||
-      !classification.subcategoryName ||
-      classification.confidenceScore < 0.7 ||
-      classificationSource === "needs_review");
+    explicitNeedsReviewOnly
+      ? true
+      : isUserCorrection && hasCompleteClassification
+      ? false
+      : (needsReviewOverride ??
+        (classification.systemName === NEEDS_REVIEW_SYSTEM ||
+          classification.categoryName === NEEDS_REVIEW_CATEGORY ||
+          !classification.subcategoryName ||
+          classification.confidenceScore < 0.7 ||
+          classificationSource === "needs_review"));
   const basePayload = {
     category: classification.systemName,
     classification_category: classification.categoryName,
