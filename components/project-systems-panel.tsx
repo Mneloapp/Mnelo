@@ -81,7 +81,7 @@ function draftForItem(item: SystemBoqItem, systemName: string, categoryName: str
 }
 
 function displaySubcategory(item: SystemBoqItem) {
-  if (item.classificationSource === "learned" && item.classificationSubcategory) {
+  if (item.classificationSubcategory) {
     return item.classificationSubcategory;
   }
 
