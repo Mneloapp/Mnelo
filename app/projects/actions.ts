@@ -612,14 +612,26 @@ function resolveAutomaticBoqClassification(row: {
     inheritedClassification?.systemName && inheritedClassification.systemName !== NEEDS_REVIEW_SYSTEM
       ? inheritedClassification.systemName
       : undefined;
+  const contextDescription = [row.description, row.section_header, row.source_sheet_name || row.sheet_name]
+    .filter(Boolean)
+    .join(" ");
   const rulesClassification = classifyBoqSystem(
     row.description,
     inheritedSystemHint || row.category,
     row.subcategory,
     row.classification_subcategory,
   );
+  const contextRulesClassification =
+    contextDescription !== row.description
+      ? classifyBoqSystem(contextDescription, inheritedSystemHint || row.category, row.subcategory, row.classification_subcategory)
+      : rulesClassification;
   const classification = isStrongClassification(rulesClassification)
     ? rulesClassification
+    : isStrongClassification(contextRulesClassification)
+      ? {
+          ...contextRulesClassification,
+          reason: "Matched local rules using item description and Excel context.",
+        }
     : isStrongClassification(inheritedClassification)
       ? inheritedClassification
       : null;

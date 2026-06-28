@@ -1210,9 +1210,20 @@ export async function getProjectSystemsForCurrentUser(projectId: string) {
       item.subcategory,
       item.classificationSubcategory,
     );
+    const contextDescription = [item.description, item.sectionHeader, item.sourceSheetName || item.sheetName]
+      .filter(Boolean)
+      .join(" ");
+    const contextRulesClassification =
+      contextDescription !== item.description
+        ? classifyBoqSystem(contextDescription, excelSystemHint || item.category, item.subcategory, item.classificationSubcategory)
+        : rulesClassification;
     const strongRulesClassification = isStrongClassificationResult(rulesClassification) ? rulesClassification : null;
+    const strongContextRulesClassification = isStrongClassificationResult(contextRulesClassification)
+      ? contextRulesClassification
+      : null;
     const strongExcelClassification = isStrongClassificationResult(excelClassification) ? excelClassification : null;
-    const classification = strongRulesClassification || strongExcelClassification || rulesClassification || excelClassification;
+    const classification =
+      strongRulesClassification || strongContextRulesClassification || strongExcelClassification || rulesClassification || excelClassification;
     const hasManualSystem =
       item.classificationSource === "learned" && item.category && item.category !== "General" && item.category !== NEEDS_REVIEW_SYSTEM;
     const hasSavedClassification =
@@ -1229,6 +1240,7 @@ export async function getProjectSystemsForCurrentUser(projectId: string) {
       : hasSavedClassification
         ? item.category
         : strongRulesClassification?.systemName ||
+          strongContextRulesClassification?.systemName ||
           strongExcelClassification?.systemName ||
           excelSystemHint ||
           firstMeaningfulValue(item.category) ||
@@ -1239,6 +1251,7 @@ export async function getProjectSystemsForCurrentUser(projectId: string) {
       : hasSavedClassification
         ? item.subcategory
         : strongRulesClassification?.categoryName ||
+          strongContextRulesClassification?.categoryName ||
           strongExcelClassification?.categoryName ||
           firstMeaningfulValue(
             item.inheritedCategory,
@@ -1252,6 +1265,7 @@ export async function getProjectSystemsForCurrentUser(projectId: string) {
       : hasSavedClassification
         ? item.classificationSubcategory || "Unclassified"
         : strongRulesClassification?.subcategoryName ||
+          strongContextRulesClassification?.subcategoryName ||
           strongExcelClassification?.subcategoryName ||
           firstMeaningfulValue(item.inheritedSubcategory, item.subcategory, item.sectionHeader, item.category) ||
           "Unclassified";
