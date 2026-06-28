@@ -1055,35 +1055,56 @@ async function getClassificationLearningMemoryForUser({
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
   userId: string;
 }) {
-  const { data, error } = await supabase
-    .from("classification_learning_memory")
-    .select(
-      "normalized_description, original_description, classification_system, classification_category, classification_subcategory, system, category, subcategory, confidence_score, created_from_file_id",
-    )
-    .eq("organization_id", userId)
-    .order("updated_at", { ascending: false })
-    .limit(3000);
+  const selectAttempts = [
+    "normalized_description, original_description, classification_system, classification_category, classification_subcategory, system, category, subcategory, confidence_score, created_from_file_id",
+    "normalized_description, original_description, system, category, subcategory, confidence_score, created_from_file_id",
+    "normalized_description, original_description, system, category, subcategory, confidence_score",
+  ];
+  let lastError: string | null = null;
 
-  if (error) {
-    if (!error.message.includes("classification_learning_memory") && !error.message.includes("schema cache")) {
-      console.error(`Failed reading classification learning memory for reparse: ${error.message}`);
+  for (const selectColumns of selectAttempts) {
+    const { data, error } = await supabase
+      .from("classification_learning_memory")
+      .select(selectColumns)
+      .eq("organization_id", userId)
+      .order("updated_at", { ascending: false })
+      .limit(3000);
+
+    if (!error) {
+      return (((data || []) as unknown) as Array<{
+        category: string | null;
+        classification_category?: string | null;
+        classification_subcategory?: string | null;
+        classification_system?: string | null;
+        confidence_score: number | null;
+        created_from_file_id?: string | null;
+        normalized_description: string | null;
+        original_description: string | null;
+        subcategory: string | null;
+        system: string | null;
+      }>).filter((memory) => memory.original_description || memory.normalized_description);
     }
 
-    return [];
+    lastError = error.message;
+
+    if (
+      !error.message.includes("classification_learning_memory") &&
+      !error.message.includes("schema cache") &&
+      !error.message.includes("classification_system") &&
+      !error.message.includes("classification_category") &&
+      !error.message.includes("classification_subcategory") &&
+      !error.message.includes("created_from_file_id")
+    ) {
+      console.error(`Failed reading classification learning memory for reparse: ${error.message}`);
+      return [];
+    }
   }
 
-  return (((data || []) as unknown) as Array<{
-    category: string | null;
-    classification_category: string | null;
-    classification_subcategory: string | null;
-    classification_system: string | null;
-    confidence_score: number | null;
-    created_from_file_id: string | null;
-    normalized_description: string | null;
-    original_description: string | null;
-    subcategory: string | null;
-    system: string | null;
-  }>).filter((memory) => memory.original_description || memory.normalized_description);
+  if (lastError) {
+    console.error(`Failed reading classification learning memory for reparse: ${lastError}`);
+  }
+
+  return [];
 }
 
 async function getPreservedManualClassificationsForProject({
@@ -1652,20 +1673,69 @@ async function applyManualClassificationsAfterParse({
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
   userId: string;
 }) {
-  const result = await supabase
-    .from("boq_items")
-    .select(
-      "id, description, quantity, unit, category, subcategory, classification_subcategory, sheet_name, row_number, source_sheet_name, source_row_number, source_file_id, project_file_id, row_type",
-    )
-    .eq("project_id", projectId)
-    .eq("user_id", userId)
-    .or(`source_file_id.eq.${projectFileId},project_file_id.eq.${projectFileId}`);
+  const selectAttempts = [
+    {
+      filterColumn: "source_file_id",
+      selectColumns:
+        "id, description, quantity, unit, category, subcategory, classification_subcategory, sheet_name, row_number, source_sheet_name, source_row_number, source_file_id, row_type",
+    },
+    {
+      filterColumn: "project_file_id",
+      selectColumns:
+        "id, description, quantity, unit, category, subcategory, classification_subcategory, sheet_name, row_number, source_sheet_name, source_row_number, project_file_id, row_type",
+    },
+    {
+      filterColumn: null,
+      selectColumns:
+        "id, description, quantity, unit, category, subcategory, classification_subcategory, sheet_name, row_number, source_sheet_name, source_row_number, row_type",
+    },
+    {
+      filterColumn: null,
+      selectColumns: "id, description, quantity, unit, category, subcategory, classification_subcategory, sheet_name, row_number, row_type",
+    },
+  ] satisfies Array<{ filterColumn: "project_file_id" | "source_file_id" | null; selectColumns: string }>;
+  let rowsResult: unknown[] | null = null;
+  let lastError: string | null = null;
 
-  if (result.error) {
-    return { error: result.error.message, restoredCount: 0 };
+  for (const attempt of selectAttempts) {
+    let query = supabase
+      .from("boq_items")
+      .select(attempt.selectColumns)
+      .eq("project_id", projectId)
+      .eq("user_id", userId);
+
+    if (attempt.filterColumn) {
+      query = query.eq(attempt.filterColumn, projectFileId);
+    }
+
+    const result = await query;
+
+    if (!result.error) {
+      rowsResult = result.data || [];
+      lastError = null;
+      break;
+    }
+
+    lastError = result.error.message;
+
+    if (
+      !result.error.message.includes("schema cache") &&
+      !result.error.message.includes("project_file_id") &&
+      !result.error.message.includes("source_file_id") &&
+      !result.error.message.includes("source_sheet_name") &&
+      !result.error.message.includes("source_row_number") &&
+      !result.error.message.includes("classification_subcategory") &&
+      !result.error.message.includes("row_type")
+    ) {
+      break;
+    }
   }
 
-  const rows = ((result.data || []) as BoqClassificationRow[]).filter((row) => !row.row_type || row.row_type === "item");
+  if (lastError) {
+    return { error: lastError, restoredCount: 0 };
+  }
+
+  const rows = ((rowsResult || []) as BoqClassificationRow[]).filter((row) => !row.row_type || row.row_type === "item");
   let restoredCount = 0;
   let firstError: string | null = null;
 
