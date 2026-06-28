@@ -1,60 +1,69 @@
 import Link from "next/link";
-import { Activity, FileText, Info, Sparkles } from "lucide-react";
+import { Activity, BookOpen, FileText, FolderOpen, Sparkles } from "lucide-react";
 import {
-  OverviewCard,
-  ProjectUnavailableState,
-  ProjectWorkspaceHeader,
-  ProjectWorkspacePage,
-  ProjectWorkspacePanel,
-} from "@/components/project-workspace";
+  MissionCard,
+  MissionProgress,
+  MissionWorkspace,
+  NextStepCard,
+  StatusBadge,
+} from "@/components/mission-ui";
+import { ProjectUnavailableState } from "@/components/project-workspace";
 import { WorkspaceShell } from "@/components/workspace-shell";
 import { getBoqItemsForCurrentUser, getProjectFilesForCurrentUser, getProjectForCurrentUser } from "@/lib/data";
-import { getParsedFileIds } from "@/lib/project-workspace";
 import { deriveProjectProcessingItems } from "@/lib/project-processing";
+import { getParsedFileIds } from "@/lib/project-workspace";
 
 export const dynamic = "force-dynamic";
+
+const missionSteps = ["Analyze", "Identify", "Prepare", "Review", "Source", "Award"];
 
 function getNextAction({
   filesCount,
   itemRows,
+  projectId,
   reviewRequired,
 }: {
   filesCount: number;
   itemRows: number;
+  projectId: string;
   reviewRequired: number;
 }) {
   if (filesCount === 0) {
     return {
-      description: "Upload the tender package, BOQ files or project documents to start building project intelligence.",
-      href: "documents",
+      count: 1,
+      href: `/projects/${projectId}/documents`,
       label: "Upload documents",
-      title: "Start with project documents",
+      text: "Upload the tender package so AI can start reading the mission.",
+      title: "Start with documents",
     };
   }
 
   if (itemRows === 0) {
     return {
-      description: "Parse an uploaded Excel BOQ so Mnelo can extract clean item rows for review.",
-      href: "documents",
+      count: 1,
+      href: `/projects/${projectId}/documents`,
       label: "Parse BOQ",
-      title: "Parse the project BOQ",
+      text: "Parse the uploaded BOQ so Mnelo can extract clean review items.",
+      title: "Prepare project intelligence",
     };
   }
 
   if (reviewRequired > 0) {
     return {
-      description: "Review low-confidence items before moving project intelligence into procurement workflows.",
-      href: "intelligence",
-      label: "Review classifications",
-      title: "Resolve items needing review",
+      count: reviewRequired,
+      href: `/projects/${projectId}/intelligence`,
+      label: "Start Review",
+      text: "These decisions need your approval before AI can continue.",
+      title: `${reviewRequired} decisions are waiting for you`,
     };
   }
 
   return {
-    description: "Review the system breakdown, confirm categories and prepare the workspace for future RFQ packages.",
-    href: "intelligence",
+    count: 0,
+    href: `/projects/${projectId}/intelligence`,
     label: "Open Intelligence",
-    title: "Project intelligence is ready",
+    text: "AI has organized the current project knowledge.",
+    title: "Mission is ready for the next stage",
   };
 }
 
@@ -77,144 +86,125 @@ export default async function ProjectDetailsPage({ params }: { params: Promise<{
     );
   }
 
-  const itemBoqRows = boqItems.filter((item) => item.rowType === "item");
-  const reviewRequired = itemBoqRows.filter((item) => item.needsReview).length;
+  const itemRows = boqItems.filter((item) => item.rowType === "item");
+  const reviewRequired = itemRows.filter((item) => item.needsReview).length;
   const parsedFileIds = getParsedFileIds(boqItems, files);
   const processingItems = deriveProjectProcessingItems({ files, parsedFileIds });
-  const processingStatus =
-    processingItems.length === 0
-      ? "Waiting"
-      : processingItems.some((item) => item.status === "failed")
-        ? "Needs attention"
-        : processingItems.every((item) => item.status === "completed")
-          ? "Completed"
-          : "In progress";
-  const nextAction = getNextAction({ filesCount: files.length, itemRows: cleanupSummary.itemRows, reviewRequired });
+  const nextAction = getNextAction({
+    filesCount: files.length,
+    itemRows: cleanupSummary.itemRows,
+    projectId: project.id,
+    reviewRequired,
+  });
+  const currentStep = cleanupSummary.itemRows > 0 ? 3 : files.length > 0 ? 1 : 0;
 
   return (
     <WorkspaceShell active="Projects">
-      <ProjectWorkspacePage>
-        <ProjectWorkspaceHeader project={project} />
+      <MissionWorkspace>
+        <header className="max-w-4xl">
+          <Link className="text-sm font-semibold text-[#16A34A] transition hover:text-[#15803D]" href="/projects">
+            Missions
+          </Link>
+          <div className="mt-5 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h1 className="text-[40px] font-semibold leading-tight tracking-[-0.02em] text-[#0F172A]">{project.name}</h1>
+              <p className="mt-3 text-lg text-[#64748B]">
+                {project.client} · {project.location} · {project.workType}
+              </p>
+            </div>
+            <StatusBadge tone="green">{project.status}</StatusBadge>
+          </div>
+        </header>
 
-        <ProjectWorkspacePanel
-          description="A focused project operating view for documents, BOQ intelligence and reusable procurement knowledge."
-          title="Overview"
-        >
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <OverviewCard detail="Uploaded project documents" label="Documents" value={String(files.length)} />
-            <OverviewCard
-              detail="Clean item rows after BOQ cleanup"
-              label="BOQ Items"
-              value={String(cleanupSummary.itemRows)}
-            />
-            <OverviewCard detail="Items requiring human verification" label="Review Required" value={String(reviewRequired)} />
-            <OverviewCard detail="Document processing pipeline" label="Processing Status" value={processingStatus} />
+        <div className="mt-10 grid gap-8 xl:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="space-y-6">
+            <MissionCard className="p-7">
+              <p className="text-sm font-semibold uppercase tracking-[0.14em] text-[#64748B]">Mission Brief</p>
+              <h2 className="mt-4 text-2xl font-semibold tracking-tight text-[#0F172A]">What AI already did</h2>
+              <p className="mt-4 max-w-3xl text-[15px] leading-7 text-[#64748B]">
+                Mnelo has collected {files.length} document{files.length === 1 ? "" : "s"} and found{" "}
+                {cleanupSummary.itemRows.toLocaleString()} clean procurement item
+                {cleanupSummary.itemRows === 1 ? "" : "s"}.{" "}
+                {reviewRequired > 0
+                  ? `${reviewRequired} decisions need your approval before the mission can move forward.`
+                  : "There are no urgent review decisions in the current workspace."}
+              </p>
+              <div className="mt-8">
+                <MissionProgress currentStep={currentStep} steps={missionSteps} />
+              </div>
+            </MissionCard>
+
+            <div className="grid gap-6 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+              <MissionCard>
+                <div className="flex items-start gap-4">
+                  <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-[#ECFDF3] text-[#22C55E]">
+                    <Sparkles aria-hidden="true" className="h-5 w-5" strokeWidth={2} />
+                  </div>
+                  <div>
+                    <h2 className="text-base font-semibold text-[#0F172A]">AI summary</h2>
+                    <p className="mt-2 text-[15px] leading-7 text-[#64748B]">
+                      {nextAction.text}
+                    </p>
+                  </div>
+                </div>
+              </MissionCard>
+              <NextStepCard count={nextAction.count} href={nextAction.href} />
+            </div>
+
+            <MissionCard>
+              <h2 className="text-base font-semibold text-[#0F172A]">Mission areas</h2>
+              <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                {[
+                  { description: "Upload and parse tender files.", href: "documents", icon: FileText, label: "Documents" },
+                  { description: "Review extracted rows and cleanup.", href: "boq", icon: FolderOpen, label: "BOQ Review" },
+                  { description: "Confirm systems and categories.", href: "intelligence", icon: Sparkles, label: "Intelligence" },
+                  { description: "Permanent project memory.", href: "knowledge", icon: BookOpen, label: "Knowledge" },
+                ].map((area) => {
+                  const AreaIcon = area.icon;
+
+                  return (
+                    <Link
+                      className="rounded-[20px] border border-[#E5E7EB] bg-white p-5 transition hover:-translate-y-0.5 hover:border-[#BBF7D0] hover:bg-[#F8FAFC]"
+                      href={`/projects/${project.id}/${area.href}`}
+                      key={area.label}
+                    >
+                      <AreaIcon aria-hidden="true" className="h-5 w-5 text-[#22C55E]" strokeWidth={2} />
+                      <p className="mt-4 text-sm font-semibold text-[#0F172A]">{area.label}</p>
+                      <p className="mt-2 text-sm leading-6 text-[#64748B]">{area.description}</p>
+                    </Link>
+                  );
+                })}
+              </div>
+            </MissionCard>
           </div>
 
-          <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-            <div className="rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-[0_18px_50px_rgba(15,23,42,0.04)]">
-              <div className="flex items-start gap-3">
-                <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#ecfdf3] text-[#16a34a]">
-                  <Info aria-hidden="true" className="h-5 w-5" strokeWidth={2} />
-                </div>
-                <div>
-                  <h2 className="text-lg font-semibold tracking-tight text-[#07130f]">Project information</h2>
-                  <p className="mt-1 text-sm text-slate-500">Core context for this estimation and procurement workspace.</p>
-                </div>
+          <aside className="rounded-[20px] border border-[#E5E7EB] bg-white p-6 shadow-[0_18px_44px_rgba(15,23,42,0.04)]">
+            <div className="flex items-center gap-3">
+              <div className="grid h-10 w-10 place-items-center rounded-2xl bg-[#F5F3FF] text-[#7C3AED]">
+                <Activity aria-hidden="true" className="h-5 w-5" strokeWidth={2} />
               </div>
-              <dl className="mt-5 grid gap-4 sm:grid-cols-2">
-                {[
-                  ["Project", project.name],
-                  ["Client", project.client],
-                  ["Location", project.location],
-                  ["Industry / Work type", project.workType],
-                ].map(([label, value]) => (
-                  <div className="rounded-xl border border-[#edf0ed] bg-[#fbfdfb] p-4" key={label}>
-                    <dt className="text-xs font-semibold uppercase tracking-[0.12em] text-[#94a3b8]">{label}</dt>
-                    <dd className="mt-2 text-sm font-semibold text-[#0f172a]">{value || "Not specified"}</dd>
+              <div>
+                <h2 className="text-base font-semibold text-[#0F172A]">Activity</h2>
+                <p className="text-sm text-[#64748B]">What changed recently</p>
+              </div>
+            </div>
+            {processingItems.length > 0 ? (
+              <div className="mt-6 space-y-5">
+                {processingItems.slice(0, 5).map((item) => (
+                  <div className="rounded-2xl border border-[#E5E7EB] p-4" key={item.id}>
+                    <p className="truncate text-sm font-semibold text-[#0F172A]">{item.fileName}</p>
+                    <p className="mt-2 text-sm capitalize text-[#64748B]">{item.stage}</p>
                   </div>
                 ))}
-              </dl>
-              {project.notes ? (
-                <div className="mt-4 rounded-xl border border-[#edf0ed] bg-[#fbfdfb] p-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#94a3b8]">Notes</p>
-                  <p className="mt-2 text-sm leading-6 text-[#334155]">{project.notes}</p>
-                </div>
-              ) : null}
-            </div>
-
-            <div className="rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-[0_18px_50px_rgba(15,23,42,0.04)]">
-              <div className="flex items-start gap-3">
-                <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#ecfdf3] text-[#16a34a]">
-                  <Sparkles aria-hidden="true" className="h-5 w-5" strokeWidth={2} />
-                </div>
-                <div>
-                  <h2 className="text-lg font-semibold tracking-tight text-[#07130f]">{nextAction.title}</h2>
-                  <p className="mt-1 text-sm leading-6 text-slate-500">{nextAction.description}</p>
-                </div>
               </div>
-              <Link
-                className="mt-5 inline-flex h-11 items-center justify-center rounded-xl bg-[#16a34a] px-5 text-sm font-semibold text-white shadow-[0_12px_28px_rgba(22,163,74,0.22)] transition hover:bg-[#087a36]"
-                href={`/projects/${project.id}/${nextAction.href}`}
-              >
-                {nextAction.label}
-              </Link>
-            </div>
-
-            <div className="rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-[0_18px_50px_rgba(15,23,42,0.04)]">
-              <div className="flex items-center justify-between gap-3">
-                <h2 className="text-lg font-semibold tracking-tight text-[#07130f]">Recent activity</h2>
-                <Link className="text-sm font-semibold text-[#087a36]" href={`/projects/${project.id}/activity`}>
-                  View activity
-                </Link>
-              </div>
-              {processingItems.length > 0 ? (
-                <div className="mt-4 divide-y divide-[#edf0ed]">
-                  {processingItems.slice(0, 3).map((item) => (
-                    <div className="flex items-center justify-between gap-4 py-3" key={item.id}>
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-[#0f172a]">{item.fileName}</p>
-                        <p className="mt-1 text-xs capitalize text-[#64748b]">{item.stage}</p>
-                      </div>
-                      <p className="whitespace-nowrap text-xs text-[#64748b]">{item.timestamp}</p>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="mt-4 rounded-xl border border-dashed border-[#e5e7eb] bg-[#f8faf8] p-6 text-center">
-                  <Activity aria-hidden="true" className="mx-auto h-5 w-5 text-[#16a34a]" strokeWidth={2} />
-                  <p className="mt-3 font-medium text-[#0f172a]">No activity yet</p>
-                  <p className="mt-2 text-sm text-[#64748b]">Project activity will appear after documents are uploaded.</p>
-                </div>
-              )}
-            </div>
-
-            <div className="rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-[0_18px_50px_rgba(15,23,42,0.04)]">
-              <div className="flex items-center justify-between gap-3">
-                <h2 className="text-lg font-semibold tracking-tight text-[#07130f]">Workspace sections</h2>
-              </div>
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                {[
-                  ["Documents", "Upload, parse and manage files", "documents"],
-                  ["BOQ Review", "Review parsed and ignored rows", "boq"],
-                  ["Intelligence", "Classify systems and categories", "intelligence"],
-                  ["Knowledge", "Permanent project memory", "knowledge"],
-                ].map(([label, description, href]) => (
-                  <Link
-                    className="rounded-xl border border-[#edf0ed] bg-[#fbfdfb] p-4 transition hover:border-[#bbf7d0] hover:bg-[#ecfdf3]"
-                    href={`/projects/${project.id}/${href}`}
-                    key={label}
-                  >
-                    <FileText aria-hidden="true" className="h-4 w-4 text-[#16a34a]" strokeWidth={2} />
-                    <p className="mt-3 text-sm font-semibold text-[#0f172a]">{label}</p>
-                    <p className="mt-1 text-xs leading-5 text-[#64748b]">{description}</p>
-                  </Link>
-                ))}
-              </div>
-            </div>
-          </div>
-        </ProjectWorkspacePanel>
-      </ProjectWorkspacePage>
+            ) : (
+              <p className="mt-6 rounded-2xl border border-dashed border-[#E5E7EB] p-5 text-sm leading-6 text-[#64748B]">
+                No activity yet. Upload project documents to start the mission.
+              </p>
+            )}
+          </aside>
+        </div>
+      </MissionWorkspace>
     </WorkspaceShell>
   );
 }

@@ -1,207 +1,154 @@
-import Link from "next/link";
-import {
-  Database,
-  FileText,
-  FileUp,
-  FolderKanban,
-  type LucideIcon,
-  Plus,
-  Search,
-  TableProperties,
-} from "lucide-react";
+import { Lightbulb, Plus } from "lucide-react";
 import { WorkspaceShell } from "@/components/workspace-shell";
+import {
+  AIActivityPanel,
+  AISuggestionCard,
+  MissionCard,
+  MissionProgress,
+  MissionWorkspace,
+  NextStepCard,
+  PrimaryButton,
+  RecentMissions,
+  StatusBadge,
+} from "@/components/mission-ui";
 import { getDashboardForCurrentUser } from "@/lib/data";
 
-function MetricCard({
-  detail,
-  icon: Icon,
-  label,
-  value,
+const missionSteps = ["Analyze", "Identify", "Prepare", "Review", "Source", "Award"];
+
+function progressForProject({
+  boqItemCount,
+  fileCount,
 }: {
-  detail: string;
-  icon: LucideIcon;
-  label: string;
-  value: string;
+  boqItemCount: number;
+  fileCount: number;
 }) {
-  return (
-    <div className="rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-[0_18px_50px_rgba(15,23,42,0.04)]">
-      <div className="flex items-start gap-4">
-        <div className="grid h-11 w-11 place-items-center rounded-xl bg-[#ecfdf3] text-sm font-black text-[#16a34a]">
-          <Icon aria-hidden="true" className="h-6 w-6" strokeWidth={2} />
-        </div>
-        <div>
-          <p className="text-sm font-medium text-slate-500">{label}</p>
-          <p className="mt-2 text-3xl font-semibold tracking-tight text-[#07130f]">{value}</p>
-          <p className="mt-3 text-xs font-medium text-slate-500">{detail}</p>
-        </div>
-      </div>
-    </div>
-  );
+  if (boqItemCount > 0) {
+    return 55;
+  }
+
+  if (fileCount > 0) {
+    return 28;
+  }
+
+  return 8;
 }
 
 export default async function DashboardPage() {
   const { projects, recentActivity, summary, errorMessage } = await getDashboardForCurrentUser();
-  const showError = process.env.NODE_ENV === "development" && errorMessage;
+  const currentMission = projects[0] || null;
+  const reviewCount = Math.min(summary.boqItems, 12);
+  const currentStep = currentMission?.boqItemCount ? 3 : currentMission?.fileCount ? 1 : 0;
+  const recentMissions = projects.slice(0, 3).map((project) => ({
+    href: `/projects/${project.id}`,
+    name: project.name,
+    progress: progressForProject(project),
+    subtitle: `${project.client} · ${project.location}`,
+  }));
+  const activities =
+    recentActivity.length > 0
+      ? recentActivity.slice(0, 5).map((activity) => ({
+          detail: activity.projectName,
+          title: `${activity.fileName} uploaded`,
+        }))
+      : [
+          {
+            detail: "Upload a tender package to begin.",
+            title: "Waiting for first mission",
+          },
+        ];
 
   return (
     <WorkspaceShell active="Dashboard">
-      <div className="mx-auto max-w-[1440px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-        <header className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+      <MissionWorkspace>
+        <div className="grid gap-8 xl:grid-cols-[minmax(0,1fr)_360px]">
           <div>
-            <h1 className="text-3xl font-semibold tracking-tight text-[#07130f]">Good morning</h1>
-            <p className="mt-2 text-sm text-slate-500">Here&apos;s what&apos;s happening with your projects today.</p>
-          </div>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <div className="relative">
-              <input
-                className="h-11 w-full rounded-xl border border-[#e5e7eb] bg-white px-4 pl-10 text-sm outline-none transition placeholder:text-slate-400 focus:border-[#16a34a] focus:ring-4 focus:ring-[#dcfce7] sm:w-80"
-                placeholder="Search projects, files, BOQ..."
-              />
-              <Search
-                aria-hidden="true"
-                className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
-                strokeWidth={2}
-              />
-            </div>
-            <Link
-              className="inline-flex h-11 items-center justify-center rounded-xl bg-[#16a34a] px-5 text-sm font-semibold text-white shadow-[0_12px_28px_rgba(22,163,74,0.24)] transition hover:bg-[#087a36]"
-              href="/projects/new"
-            >
-              <Plus aria-hidden="true" className="mr-2 h-4 w-4" strokeWidth={2} />
-              New Project
-            </Link>
-          </div>
-        </header>
-
-        {showError ? (
-          <div className="mt-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 font-mono text-xs text-red-800">
-            {errorMessage}
-          </div>
-        ) : null}
-
-        <section className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <MetricCard
-            detail="Loaded from Supabase"
-            icon={FolderKanban}
-            label="Total Projects"
-            value={String(summary.totalProjects)}
-          />
-          <MetricCard
-            detail="Parsed line items"
-            icon={TableProperties}
-            label="BOQ Items"
-            value={summary.boqItems.toLocaleString()}
-          />
-          <MetricCard detail="Uploaded documents" icon={FileText} label="Files" value={String(summary.files)} />
-          <MetricCard detail="Across project documents" icon={Database} label="Storage Used" value={summary.storageUsed} />
-        </section>
-
-        <section className="mt-6 grid gap-6 xl:grid-cols-[1fr_22rem]">
-          <div className="overflow-hidden rounded-2xl border border-[#e5e7eb] bg-white shadow-[0_18px_50px_rgba(15,23,42,0.04)]">
-            <div className="flex flex-col gap-4 border-b border-[#e5e7eb] px-5 py-5 sm:flex-row sm:items-center sm:justify-between">
+            <header className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <h2 className="text-lg font-semibold tracking-tight text-[#07130f]">All Projects</h2>
-                <p className="mt-1 text-sm text-slate-500">Real project, file, and BOQ activity from your workspace.</p>
+                <h1 className="text-[40px] font-semibold leading-tight tracking-[-0.02em] text-[#0F172A]">
+                  Good morning, George.
+                </h1>
+                <p className="mt-3 text-lg text-[#64748B]">AI has your procurement under control.</p>
               </div>
-              <Link className="text-sm font-semibold text-[#087a36]" href="/projects/new">
-                Create project
-              </Link>
-            </div>
+              <PrimaryButton href="/projects/new">
+                <Plus aria-hidden="true" className="mr-2 h-4 w-4" strokeWidth={2} />
+                New Mission
+              </PrimaryButton>
+            </header>
 
-            {projects.length > 0 ? (
-              <div className="overflow-x-auto">
-                <table className="min-w-full text-left text-sm">
-                  <thead className="bg-[#fbfdfb] text-xs uppercase tracking-[0.12em] text-slate-400">
-                    <tr>
-                      <th className="px-5 py-4 font-semibold">Project</th>
-                      <th className="px-5 py-4 text-right font-semibold">BOQ Items</th>
-                      <th className="px-5 py-4 text-right font-semibold">Files</th>
-                      <th className="px-5 py-4 font-semibold">Updated</th>
-                      <th className="px-5 py-4 text-right font-semibold">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[#edf0ed]">
-                    {projects.map((project) => (
-                      <tr className="transition hover:bg-[#f8faf8]" key={project.id}>
-                        <td className="px-5 py-4">
-                          <Link href={`/projects/${project.id}`} className="group flex items-center gap-3">
-                            <span className="grid h-11 w-11 place-items-center rounded-xl bg-[#ecfdf3] text-sm font-bold text-[#087a36]">
-                              <FolderKanban aria-hidden="true" className="h-5 w-5" strokeWidth={2} />
-                            </span>
-                            <span>
-                              <span className="block font-semibold text-[#07130f] group-hover:text-[#087a36]">
-                                {project.name}
-                              </span>
-                              <span className="mt-1 block text-xs text-slate-500">
-                                {project.client} / {project.location} / {project.workType}
-                              </span>
-                            </span>
-                          </Link>
-                        </td>
-                        <td className="px-5 py-4 text-right font-medium text-slate-700">
-                          {project.boqItemCount.toLocaleString()}
-                        </td>
-                        <td className="px-5 py-4 text-right font-medium text-slate-700">{project.fileCount}</td>
-                        <td className="whitespace-nowrap px-5 py-4 text-slate-500">{project.updatedAt}</td>
-                        <td className="px-5 py-4 text-right">
-                          <Link
-                            className="rounded-lg px-3 py-2 text-sm font-semibold text-[#087a36] transition hover:bg-[#ecfdf3]"
-                            href={`/projects/${project.id}`}
-                          >
-                            Open
-                          </Link>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            {process.env.NODE_ENV === "development" && errorMessage ? (
+              <div className="mt-6 rounded-[20px] border border-red-200 bg-red-50 px-5 py-4 font-mono text-xs text-red-700">
+                {errorMessage}
               </div>
-            ) : (
-              <div className="px-5 py-14 text-center">
-                <p className="text-lg font-semibold text-[#07130f]">No projects yet</p>
-                <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500">
-                  Create your first project to upload files, parse BOQs, and track estimation work.
-                </p>
-                <Link
-                  className="mt-5 inline-flex h-10 items-center justify-center rounded-xl bg-[#16a34a] px-4 text-sm font-semibold text-white"
-                  href="/projects/new"
-                >
-                  <Plus aria-hidden="true" className="mr-2 h-4 w-4" strokeWidth={2} />
-                  New Project
-                </Link>
+            ) : null}
+
+            <section className="mt-10 grid gap-6">
+              <MissionCard className="p-7">
+                <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <p className="text-sm font-semibold uppercase tracking-[0.14em] text-[#64748B]">Current Mission</p>
+                    <h2 className="mt-4 text-3xl font-semibold tracking-tight text-[#0F172A]">
+                      {currentMission?.name || "No active mission yet"}
+                    </h2>
+                    <div className="mt-4">
+                      <StatusBadge tone={currentMission ? "green" : "neutral"}>
+                        {currentMission?.status || "Waiting for project"}
+                      </StatusBadge>
+                    </div>
+                    <p className="mt-5 max-w-2xl text-[15px] leading-7 text-[#64748B]">
+                      {currentMission
+                        ? `AI reviewed ${currentMission.fileCount} document${
+                            currentMission.fileCount === 1 ? "" : "s"
+                          } and organized ${currentMission.boqItemCount.toLocaleString()} procurement item${
+                            currentMission.boqItemCount === 1 ? "" : "s"
+                          } for this mission.`
+                        : "Create a mission to let Mnelo read documents, identify decisions and prepare procurement work."}
+                    </p>
+                  </div>
+                  <div className="rounded-[20px] border border-[#E5E7EB] bg-[#F8FAFC] p-5 lg:w-64">
+                    <p className="text-sm font-medium text-[#64748B]">AI summary</p>
+                    <p className="mt-3 text-2xl font-semibold text-[#0F172A]">{summary.totalProjects}</p>
+                    <p className="mt-1 text-sm text-[#64748B]">active mission{summary.totalProjects === 1 ? "" : "s"}</p>
+                  </div>
+                </div>
+
+                <div className="mt-8">
+                  <MissionProgress currentStep={currentStep} steps={missionSteps} />
+                </div>
+              </MissionCard>
+
+              <div className="grid gap-6 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+                <NextStepCard count={reviewCount} href={currentMission ? `/projects/${currentMission.id}/intelligence` : "/projects/new"} />
+                <RecentMissions missions={recentMissions} />
               </div>
-            )}
+
+              <AISuggestionCard
+                ctaHref={currentMission ? `/projects/${currentMission.id}/documents` : "/projects/new"}
+                ctaLabel={currentMission ? "Open documents" : "Create mission"}
+                icon={Lightbulb}
+                text={
+                  currentMission
+                    ? "Keep documents and decisions in one mission workspace before moving into supplier sourcing."
+                    : "Start by creating one mission and uploading the tender package. Mnelo will organize the next steps."
+                }
+                title="AI Suggestion"
+              />
+            </section>
           </div>
 
-          <aside className="rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-[0_18px_50px_rgba(15,23,42,0.04)]">
-            <h2 className="text-lg font-semibold tracking-tight text-[#07130f]">Recent Activity</h2>
-            {recentActivity.length > 0 ? (
-              <div className="mt-5 space-y-4">
-                {recentActivity.map((activity) => (
-                  <Link
-                    className="flex gap-3 rounded-xl p-2 transition hover:bg-[#f8faf8]"
-                    href={`/projects/${activity.projectId}`}
-                    key={activity.id}
-                  >
-                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#ecfdf3] text-xs font-bold text-[#16a34a]">
-                      <FileUp aria-hidden="true" className="h-5 w-5" strokeWidth={2} />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-semibold text-[#07130f]">{activity.fileName}</span>
-                      <span className="mt-1 block text-xs text-slate-500">{activity.projectName}</span>
-                    </span>
-                    <span className="whitespace-nowrap text-xs text-slate-400">{activity.uploadedAt}</span>
-                  </Link>
-                ))}
-              </div>
-            ) : (
-              <div className="mt-5 rounded-xl border border-dashed border-[#e5e7eb] bg-[#f8faf8] p-6 text-center">
-                <p className="text-sm font-medium text-slate-600">No recent activity yet.</p>
-              </div>
-            )}
-          </aside>
-        </section>
-      </div>
+          <AIActivityPanel
+            activities={[
+              ...activities,
+              {
+                detail:
+                  reviewCount > 0
+                    ? `${reviewCount} items need your review before procurement packages can move forward.`
+                    : "No urgent decisions are waiting right now.",
+                title: reviewCount > 0 ? "Decisions waiting" : "Workspace calm",
+              },
+            ].slice(0, 5)}
+          />
+        </div>
+      </MissionWorkspace>
     </WorkspaceShell>
   );
 }
