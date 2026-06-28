@@ -76,3 +76,5 @@ Fixed classification precedence so weak Excel context no longer blocks strong ro
 Added durable manual classification memory outside parsed BOQ rows so user corrections can survive reparse even when `boq_items` rows are recreated.
 
 Manual classification corrections are persistent and must survive re-parse. User-confirmed rows use `classification_source = user` and `user_corrected = true`.
+
+Re-parse restore now matches manual corrections by file, sheet, normalized description, unit and quantity instead of row IDs.

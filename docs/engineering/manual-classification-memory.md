@@ -42,15 +42,19 @@ When a workbook is reparsed, Mnelo restores manual classifications before applyi
 
 Matching order:
 
-1. Durable manual memory strict fingerprint: sheet + row + normalized description + quantity + unit.
-2. Durable manual memory content fingerprint: normalized description + quantity + unit.
-3. Durable manual memory description and unit.
-4. Durable manual memory normalized description only when it is unique.
-5. Current parsed row manual correction using the same matching order.
-6. Learned correction.
-7. Rules classifier.
-8. Weak Excel context as a system hint.
-9. Needs Review.
+1. Durable manual memory strict fingerprint: file + sheet + row + normalized description + quantity + unit.
+2. Durable manual memory sheet/content fingerprint: file + sheet + normalized description + quantity + unit.
+3. Durable manual memory content fingerprint: file + normalized description + quantity + unit.
+4. Durable manual memory description and unit: file + normalized description + unit.
+5. Durable manual memory normalized description when it is unique for the file.
+6. Durable manual memory normalized description only when it is globally unique.
+7. Current parsed row manual correction using the same matching order.
+8. Learned correction.
+9. Rules classifier.
+10. Weak Excel context as a system hint.
+11. Needs Review.
+
+`boq_items.id` is never used for reparse matching because reparse can delete and recreate parsed rows.
 
 If a match is found, Mnelo applies:
 

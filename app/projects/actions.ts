@@ -120,6 +120,7 @@ type PreservedManualClassification = {
   classificationSubcategory: string | null;
   confidenceScore: number;
   description: string;
+  fileId: string | null;
   quantity: number | null;
   rowNumber: number | null;
   sheetName: string | null;
@@ -145,6 +146,7 @@ type LearnedClassification = {
     system?: string | null;
   } | null;
   quantity?: number | null;
+  source_file_id?: string | null;
   source_row_number?: number | null;
   source_sheet_name?: string | null;
   unit?: string | null;
@@ -207,7 +209,7 @@ function getFileExtension(fileName: string) {
 function normalizeFingerprintText(value?: string | number | null) {
   return String(value ?? "")
     .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s./&-]/gu, " ")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -222,12 +224,14 @@ function normalizeFingerprintQuantity(value?: number | null) {
 
 function boqRowStrictFingerprint(row: {
   description: string;
+  fileId?: string | null;
   quantity?: number | null;
   rowNumber?: number | null;
   sheetName?: string | null;
   unit?: string | null;
 }) {
   return [
+    normalizeFingerprintText(row.fileId),
     normalizeFingerprintText(row.sheetName),
     normalizeFingerprintText(row.rowNumber),
     normalizeFingerprintText(row.description),
@@ -236,57 +240,91 @@ function boqRowStrictFingerprint(row: {
   ].join("|");
 }
 
-function boqRowContentFingerprint(row: { description: string; quantity?: number | null; unit?: string | null }) {
+function boqRowContentFingerprint(row: { description: string; fileId?: string | null; quantity?: number | null; unit?: string | null }) {
   return [
+    normalizeFingerprintText(row.fileId),
     normalizeFingerprintText(row.description),
     normalizeFingerprintQuantity(row.quantity),
     normalizeFingerprintText(row.unit),
   ].join("|");
 }
 
-function boqRowDescriptionUnitFingerprint(row: { description: string; unit?: string | null }) {
-  return [normalizeFingerprintText(row.description), normalizeFingerprintText(row.unit)].join("|");
+function boqRowSheetContentFingerprint(row: {
+  description: string;
+  fileId?: string | null;
+  quantity?: number | null;
+  sheetName?: string | null;
+  unit?: string | null;
+}) {
+  return [
+    normalizeFingerprintText(row.fileId),
+    normalizeFingerprintText(row.sheetName),
+    normalizeFingerprintText(row.description),
+    normalizeFingerprintQuantity(row.quantity),
+    normalizeFingerprintText(row.unit),
+  ].join("|");
+}
+
+function boqRowDescriptionUnitFingerprint(row: { description: string; fileId?: string | null; unit?: string | null }) {
+  return [normalizeFingerprintText(row.fileId), normalizeFingerprintText(row.description), normalizeFingerprintText(row.unit)].join("|");
+}
+
+function boqRowDescriptionFingerprint(row: { description: string; fileId?: string | null }) {
+  return [normalizeFingerprintText(row.fileId), normalizeFingerprintText(row.description)].join("|");
 }
 
 function buildPreservedManualClassificationMaps(preserved: PreservedManualClassification[]) {
   const strict = new Map<string, PreservedManualClassification>();
+  const sheetContent = new Map<string, PreservedManualClassification>();
   const content = new Map<string, PreservedManualClassification>();
   const descriptionUnit = new Map<string, PreservedManualClassification>();
   const descriptionCounts = new Map<string, number>();
   const description = new Map<string, PreservedManualClassification>();
+  const globalDescriptionCounts = new Map<string, number>();
+  const globalDescription = new Map<string, PreservedManualClassification>();
 
   for (const classification of preserved) {
     strict.set(boqRowStrictFingerprint(classification), classification);
+    sheetContent.set(boqRowSheetContentFingerprint(classification), classification);
     content.set(boqRowContentFingerprint(classification), classification);
     descriptionUnit.set(boqRowDescriptionUnitFingerprint(classification), classification);
 
-    const descriptionFingerprint = normalizeFingerprintText(classification.description);
+    const descriptionFingerprint = boqRowDescriptionFingerprint(classification);
     descriptionCounts.set(descriptionFingerprint, (descriptionCounts.get(descriptionFingerprint) || 0) + 1);
     description.set(descriptionFingerprint, classification);
+
+    const globalDescriptionFingerprint = normalizeFingerprintText(classification.description);
+    globalDescriptionCounts.set(globalDescriptionFingerprint, (globalDescriptionCounts.get(globalDescriptionFingerprint) || 0) + 1);
+    globalDescription.set(globalDescriptionFingerprint, classification);
   }
 
-  return { content, description, descriptionCounts, descriptionUnit, strict };
+  return { content, description, descriptionCounts, descriptionUnit, globalDescription, globalDescriptionCounts, sheetContent, strict };
 }
 
 function findPreservedManualClassification(
   row: ParsedBoqRow,
   maps: ReturnType<typeof buildPreservedManualClassificationMaps>,
+  fileId?: string | null,
 ) {
   const fingerprintRow = {
     description: row.description,
+    fileId,
     quantity: row.quantity,
     rowNumber: row.source_row_number || row.row_number,
     sheetName: row.source_sheet_name || row.sheet_name,
     unit: row.unit,
   };
 
-  const descriptionFingerprint = normalizeFingerprintText(row.description);
+  const descriptionFingerprint = boqRowDescriptionFingerprint(fingerprintRow);
+  const globalDescriptionFingerprint = normalizeFingerprintText(row.description);
 
   return (
     maps.strict.get(boqRowStrictFingerprint(fingerprintRow)) ||
+    maps.sheetContent.get(boqRowSheetContentFingerprint(fingerprintRow)) ||
     maps.content.get(boqRowContentFingerprint(fingerprintRow)) ||
     maps.descriptionUnit.get(boqRowDescriptionUnitFingerprint(fingerprintRow)) ||
     (maps.descriptionCounts.get(descriptionFingerprint) === 1 ? maps.description.get(descriptionFingerprint) : null) ||
+    (maps.globalDescriptionCounts.get(globalDescriptionFingerprint) === 1 ? maps.globalDescription.get(globalDescriptionFingerprint) : null) ||
     null
   );
 }
@@ -342,12 +380,13 @@ function resolveBoqItemClassification(
   row: ParsedBoqRow,
   context: {
     durableManualMemory: ReturnType<typeof buildPreservedManualClassificationMaps> | null;
+    fileId?: string | null;
     learnedClassifications: LearnedClassification[];
     preservedManualCorrections: ReturnType<typeof buildPreservedManualClassificationMaps> | null;
   },
 ): ClassificationPrediction {
   const durableManualClassification = context.durableManualMemory
-    ? findPreservedManualClassification(row, context.durableManualMemory)
+    ? findPreservedManualClassification(row, context.durableManualMemory, context.fileId)
     : null;
 
   if (durableManualClassification) {
@@ -355,7 +394,7 @@ function resolveBoqItemClassification(
   }
 
   const preservedManualClassification = context.preservedManualCorrections
-    ? findPreservedManualClassification(row, context.preservedManualCorrections)
+    ? findPreservedManualClassification(row, context.preservedManualCorrections, context.fileId)
     : null;
 
   if (preservedManualClassification) {
@@ -425,6 +464,7 @@ function predictClassification(
 ): ClassificationPrediction {
   return resolveBoqItemClassification(row, {
     durableManualMemory: preservedManualClassifications,
+    fileId: null,
     learnedClassifications,
     preservedManualCorrections: null,
   });
@@ -807,17 +847,19 @@ async function persistManualClassificationMemory({
 }
 
 async function getPreservedManualClassificationsForProject({
+  projectFileId,
   projectId,
   supabase,
   userId,
 }: {
+  projectFileId?: string | null;
   projectId: string;
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
   userId: string;
 }): Promise<ManualClassificationRestoreSet> {
   const selectAttempts = [
-    "id, description, quantity, unit, category, subcategory, classification_system, classification_category, classification_subcategory, classification_confidence, classification_reason, classification_source, user_corrected, needs_review, row_type, sheet_name, row_number, source_sheet_name, source_row_number",
-    "id, description, quantity, unit, category, subcategory, classification_subcategory, classification_confidence, classification_reason, classification_source, needs_review, row_type, sheet_name, row_number, source_sheet_name, source_row_number",
+    "id, description, quantity, unit, category, subcategory, classification_system, classification_category, classification_subcategory, classification_confidence, classification_reason, classification_source, user_corrected, needs_review, row_type, sheet_name, row_number, source_sheet_name, source_row_number, source_file_id, project_file_id",
+    "id, description, quantity, unit, category, subcategory, classification_subcategory, classification_confidence, classification_reason, classification_source, needs_review, row_type, sheet_name, row_number, source_sheet_name, source_row_number, source_file_id, project_file_id",
     "id, description, quantity, unit, category, subcategory, classification_subcategory, classification_confidence, classification_reason, classification_source, row_type, sheet_name, row_number",
     "id, description, quantity, unit, category, subcategory, classification_subcategory, classification_reason, classification_source, sheet_name, row_number",
     "id, description, quantity, unit, category, subcategory, classification_subcategory, classification_source",
@@ -847,6 +889,8 @@ async function getPreservedManualClassificationsForProject({
       !result.error.message.includes("user_corrected") &&
       !result.error.message.includes("source_sheet_name") &&
       !result.error.message.includes("source_row_number") &&
+      !result.error.message.includes("source_file_id") &&
+      !result.error.message.includes("project_file_id") &&
       !result.error.message.includes("row_type")
     ) {
       console.error(`Failed reading manual BOQ classifications before reparse: ${result.error.message}`);
@@ -855,13 +899,22 @@ async function getPreservedManualClassificationsForProject({
   }
 
   const currentManualClassifications = ((rows || []) as BoqClassificationRow[])
-    .filter((row) => (!row.row_type || row.row_type === "item") && isManualBoqClassification(row))
+    .filter((row) => {
+      const rowFileId = row.source_file_id || row.project_file_id || null;
+
+      return (
+        (!row.row_type || row.row_type === "item") &&
+        isManualBoqClassification(row) &&
+        (!projectFileId || !rowFileId || rowFileId === projectFileId)
+      );
+    })
     .map((row) => ({
       category: row.classification_system || row.category || NEEDS_REVIEW_SYSTEM,
       classificationReason: row.classification_reason || "Preserved manual correction during reparse.",
       classificationSubcategory: row.classification_subcategory || null,
       confidenceScore: Number(row.classification_confidence || 1),
       description: row.description,
+      fileId: row.source_file_id || row.project_file_id || projectFileId || null,
       quantity: row.quantity === null || row.quantity === undefined ? null : Number(row.quantity || 0),
       rowNumber:
         row.source_row_number === null || row.source_row_number === undefined
@@ -881,6 +934,7 @@ async function getPreservedManualClassificationsForProject({
         classificationSubcategory: classification.classificationSubcategory,
         confidenceScore: classification.confidenceScore,
         description: classification.description,
+        sourceFileId: classification.fileId || projectFileId || null,
         projectId,
         quantity: classification.quantity,
         reason: classification.classificationReason || "Backfilled manual correction before reparse.",
@@ -895,7 +949,7 @@ async function getPreservedManualClassificationsForProject({
   });
 
   const memorySelectAttempts = [
-    "item_description, normalized_description, item_fingerprint, source_sheet_name, source_row_number, quantity, unit, final_system, final_category, final_subcategory, final_classification_subcategory, user_corrected_category, user_corrected_subcategory, output, confidence_score, feedback",
+    "item_description, normalized_description, item_fingerprint, source_file_id, source_sheet_name, source_row_number, quantity, unit, final_system, final_category, final_subcategory, final_classification_subcategory, user_corrected_category, user_corrected_subcategory, output, confidence_score, feedback",
     "item_description, final_category, final_subcategory, final_classification_subcategory, user_corrected_category, user_corrected_subcategory, output, confidence_score, feedback",
     "item_description, final_category, final_subcategory, user_corrected_category, user_corrected_subcategory, output, confidence_score, feedback",
   ];
@@ -923,6 +977,7 @@ async function getPreservedManualClassificationsForProject({
       !result.error.message.includes("final_classification_subcategory") &&
       !result.error.message.includes("normalized_description") &&
       !result.error.message.includes("item_fingerprint") &&
+      !result.error.message.includes("source_file_id") &&
       !result.error.message.includes("source_sheet_name") &&
       !result.error.message.includes("source_row_number") &&
       !result.error.message.includes("quantity") &&
@@ -952,6 +1007,7 @@ async function getPreservedManualClassificationsForProject({
         classificationSubcategory: subcategoryName,
         confidenceScore: 1,
         description: row.item_description,
+        fileId: row.source_file_id || projectFileId || null,
         quantity: row.quantity === null || row.quantity === undefined ? null : Number(row.quantity || 0),
         rowNumber: row.source_row_number === null || row.source_row_number === undefined ? null : Number(row.source_row_number),
         sheetName: row.source_sheet_name || null,
@@ -1024,6 +1080,7 @@ async function saveParsedBoqRows({
   const preservedManualCorrectionMaps = buildPreservedManualClassificationMaps(manualClassificationRestoreSet.currentManualClassifications);
   const classificationContext = {
     durableManualMemory: durableManualMemoryMaps,
+    fileId: projectFileId,
     learnedClassifications,
     preservedManualCorrections: preservedManualCorrectionMaps,
   };
@@ -1698,6 +1755,7 @@ export async function saveBoqColumnMappingAndParse(formData: FormData) {
   }
 
   const manualClassificationRestoreSet = await getPreservedManualClassificationsForProject({
+    projectFileId,
     projectId,
     supabase,
     userId: user.id,
@@ -1798,6 +1856,7 @@ export async function parseExistingProjectFile(formData: FormData) {
   }
 
   const manualClassificationRestoreSet = await getPreservedManualClassificationsForProject({
+    projectFileId,
     projectId,
     supabase,
     userId: user.id,
