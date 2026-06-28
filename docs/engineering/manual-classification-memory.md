@@ -54,10 +54,10 @@ Matching order:
 
 If a match is found, Mnelo applies:
 
-- `classification_source = learned`
+- `classification_source = user`
 - `classification_confidence = 1`
 - `needs_review = false`
-- `user_corrected = true` where available
+- `user_corrected = true`
 - saved `final_system`, `final_category` and `final_subcategory`
 
 ## Precedence Rule

@@ -26,7 +26,7 @@ export type BoqItem = {
   classificationSubcategory: string | null;
   confidenceScore: number;
   classificationReason: string | null;
-  classificationSource: "ai" | "inherited_header" | "learned" | "needs_review" | "rules";
+  classificationSource: "ai" | "inherited_header" | "learned" | "needs_review" | "rules" | "user";
   needsReview: boolean;
   cleanupReason: string | null;
   inheritedCategory: string | null;
@@ -120,7 +120,9 @@ export type BoqItemRow = {
   amount?: number | null;
   category?: string | null;
   subcategory?: string | null;
+  classification_category?: string | null;
   classification_confidence?: number | null;
+  classification_system?: string | null;
   confidence_score?: number | null;
   classification_reason?: string | null;
   classification_source?: string | null;
@@ -129,6 +131,7 @@ export type BoqItemRow = {
   inherited_category?: string | null;
   inherited_subcategory?: string | null;
   needs_review?: boolean | null;
+  user_corrected?: boolean | null;
   row_type?: string | null;
   section_header?: string | null;
   source_row_number?: number | null;
@@ -389,12 +392,13 @@ export function mapBoqItem(row: BoqItemRow): BoqItem {
     row.classification_source === "ai" ||
     row.classification_source === "inherited_header" ||
     row.classification_source === "learned" ||
+    row.classification_source === "user" ||
     row.classification_source === "rules" ||
     row.classification_source === "needs_review"
       ? row.classification_source
       : null;
   const classificationSource = isManualClassificationRow(row)
-    ? "learned"
+    ? "user"
     : storedClassificationSource ||
       (row.category === NEEDS_REVIEW_SYSTEM
         ? "needs_review"
@@ -409,8 +413,8 @@ export function mapBoqItem(row: BoqItemRow): BoqItem {
     unit: row.unit,
     rate: row.rate === null || row.rate === undefined ? null : Number(row.rate || 0),
     amount: row.amount === null || row.amount === undefined ? null : Number(row.amount || 0),
-    category: row.category || "General",
-    subcategory: row.subcategory || "Unclassified",
+    category: row.classification_system || row.category || "General",
+    subcategory: row.classification_category || row.subcategory || "Unclassified",
     classificationSubcategory: row.classification_subcategory || null,
     confidenceScore: Number(row.classification_confidence ?? row.confidence_score ?? 0),
     classificationReason: row.classification_reason || null,
@@ -453,7 +457,7 @@ function filterBoqRowsForExistingFiles(rows: BoqItemRow[], validFileIds: Set<str
 }
 
 function isManualClassificationRow(row: BoqItemRow) {
-  if (row.classification_source === "learned") {
+  if (row.user_corrected === true || row.classification_source === "user" || row.classification_source === "learned") {
     return true;
   }
 

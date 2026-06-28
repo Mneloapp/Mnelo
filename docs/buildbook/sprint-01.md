@@ -74,3 +74,5 @@ Improved rules-first electrical subcategory detection while preserving Needs Rev
 Fixed classification precedence so weak Excel context no longer blocks strong row-description rules, and strengthened manual correction preservation during reparse.
 
 Added durable manual classification memory outside parsed BOQ rows so user corrections can survive reparse even when `boq_items` rows are recreated.
+
+Manual classification corrections are persistent and must survive re-parse. User-confirmed rows use `classification_source = user` and `user_corrected = true`.

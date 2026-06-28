@@ -60,7 +60,7 @@ type MappingColumnOption = {
   value: string;
 };
 
-type ClassificationSource = "ai" | "inherited_header" | "learned" | "needs_review" | "rules";
+type ClassificationSource = "ai" | "inherited_header" | "learned" | "needs_review" | "rules" | "user";
 
 type ClassificationPrediction = {
   predicted_category: string;
@@ -71,6 +71,7 @@ type ClassificationPrediction = {
   classification_source: ClassificationSource;
   predicted_classification_subcategory: string | null;
   needs_review: boolean;
+  user_corrected: boolean;
 };
 
 type BoqInsertMode = {
@@ -94,7 +95,9 @@ type BoqClassificationRow = {
   category?: string | null;
   subcategory?: string | null;
   classification_confidence?: number | null;
+  classification_category?: string | null;
   classification_reason?: string | null;
+  classification_system?: string | null;
   classification_source?: ClassificationSource | null;
   classification_subcategory?: string | null;
   inherited_category?: string | null;
@@ -108,6 +111,7 @@ type BoqClassificationRow = {
   source_file_id?: string | null;
   source_row_number?: number | null;
   source_sheet_name?: string | null;
+  user_corrected?: boolean | null;
 };
 
 type PreservedManualClassification = {
@@ -149,7 +153,14 @@ type LearnedClassification = {
 };
 
 function isClassificationSource(value: unknown): value is ClassificationSource {
-  return value === "ai" || value === "inherited_header" || value === "learned" || value === "needs_review" || value === "rules";
+  return (
+    value === "ai" ||
+    value === "inherited_header" ||
+    value === "learned" ||
+    value === "needs_review" ||
+    value === "rules" ||
+    value === "user"
+  );
 }
 
 export type ProjectDocumentActionResult = {
@@ -306,6 +317,7 @@ function needsReviewPrediction({
     predicted_classification_subcategory: null,
     predicted_subcategory: NEEDS_REVIEW_CATEGORY,
     predicted_supplier_type: "Needs review",
+    user_corrected: false,
   };
 }
 
@@ -315,13 +327,14 @@ function manualClassificationPrediction(
 ): ClassificationPrediction {
   return {
     classification_reason: classification.classificationReason || fallbackReason,
-    classification_source: "learned",
+    classification_source: "user",
     confidence_score: classification.confidenceScore || 1,
     needs_review: false,
     predicted_category: classification.category,
     predicted_classification_subcategory: classification.classificationSubcategory,
     predicted_subcategory: classification.subcategory,
     predicted_supplier_type: "User corrected supplier",
+    user_corrected: true,
   };
 }
 
@@ -363,6 +376,7 @@ function resolveBoqItemClassification(
       predicted_classification_subcategory: learnedClassification.subcategoryName || null,
       predicted_supplier_type: learnedClassification.supplierType,
       confidence_score: learnedHasSubcategory ? learnedClassification.confidenceScore : Math.min(learnedClassification.confidenceScore, 0.68),
+      user_corrected: learnedHasSubcategory,
     };
   }
 
@@ -400,6 +414,7 @@ function resolveBoqItemClassification(
     predicted_classification_subcategory: classification.subcategoryName || null,
     predicted_supplier_type: classification.supplierType,
     confidence_score: classification.confidenceScore,
+    user_corrected: false,
   };
 }
 
@@ -642,7 +657,9 @@ function isManualBoqClassification(row: BoqClassificationRow) {
   const confidenceScore = Number(row.classification_confidence || 0);
 
   return Boolean(
-    row.classification_source === "learned" ||
+    row.user_corrected === true ||
+      row.classification_source === "user" ||
+      row.classification_source === "learned" ||
       (row.category &&
         row.subcategory &&
         row.classification_subcategory &&
@@ -799,6 +816,7 @@ async function getPreservedManualClassificationsForProject({
   userId: string;
 }): Promise<ManualClassificationRestoreSet> {
   const selectAttempts = [
+    "id, description, quantity, unit, category, subcategory, classification_system, classification_category, classification_subcategory, classification_confidence, classification_reason, classification_source, user_corrected, needs_review, row_type, sheet_name, row_number, source_sheet_name, source_row_number",
     "id, description, quantity, unit, category, subcategory, classification_subcategory, classification_confidence, classification_reason, classification_source, needs_review, row_type, sheet_name, row_number, source_sheet_name, source_row_number",
     "id, description, quantity, unit, category, subcategory, classification_subcategory, classification_confidence, classification_reason, classification_source, row_type, sheet_name, row_number",
     "id, description, quantity, unit, category, subcategory, classification_subcategory, classification_reason, classification_source, sheet_name, row_number",
@@ -821,9 +839,12 @@ async function getPreservedManualClassificationsForProject({
     if (
       !result.error.message.includes("schema cache") &&
       !result.error.message.includes("classification_subcategory") &&
+      !result.error.message.includes("classification_system") &&
+      !result.error.message.includes("classification_category") &&
       !result.error.message.includes("classification_confidence") &&
       !result.error.message.includes("classification_reason") &&
       !result.error.message.includes("classification_source") &&
+      !result.error.message.includes("user_corrected") &&
       !result.error.message.includes("source_sheet_name") &&
       !result.error.message.includes("source_row_number") &&
       !result.error.message.includes("row_type")
@@ -836,7 +857,7 @@ async function getPreservedManualClassificationsForProject({
   const currentManualClassifications = ((rows || []) as BoqClassificationRow[])
     .filter((row) => (!row.row_type || row.row_type === "item") && isManualBoqClassification(row))
     .map((row) => ({
-      category: row.category || NEEDS_REVIEW_SYSTEM,
+      category: row.classification_system || row.category || NEEDS_REVIEW_SYSTEM,
       classificationReason: row.classification_reason || "Preserved manual correction during reparse.",
       classificationSubcategory: row.classification_subcategory || null,
       confidenceScore: Number(row.classification_confidence || 1),
@@ -849,7 +870,7 @@ async function getPreservedManualClassificationsForProject({
             : Number(row.row_number)
           : Number(row.source_row_number),
       sheetName: row.source_sheet_name || row.sheet_name || null,
-      subcategory: row.subcategory || NEEDS_REVIEW_CATEGORY,
+      subcategory: row.classification_category || row.subcategory || NEEDS_REVIEW_CATEGORY,
       unit: row.unit || null,
     })) satisfies PreservedManualClassification[];
 
@@ -1036,6 +1057,7 @@ async function saveParsedBoqRows({
               predicted_category: "Ignored",
               predicted_subcategory: rowType,
               predicted_supplier_type: "Not applicable",
+              user_corrected: false,
             } satisfies ClassificationPrediction);
       const payload: Record<string, unknown> = {
         project_id: projectId,
@@ -1059,10 +1081,13 @@ async function saveParsedBoqRows({
       }
 
       if (includesClassificationMeta) {
+        payload.classification_system = prediction.predicted_category;
+        payload.classification_category = prediction.predicted_subcategory;
         payload.classification_subcategory = prediction.predicted_classification_subcategory;
         payload.classification_confidence = prediction.confidence_score;
         payload.classification_reason = prediction.classification_reason;
         payload.classification_source = prediction.classification_source;
+        payload.user_corrected = prediction.user_corrected;
         if (optionalColumns !== "withoutClassificationStatus") {
           payload.classification_status = prediction.needs_review ? "needs_review" : "classified";
         }
@@ -1149,9 +1174,12 @@ async function saveParsedBoqRows({
       boqError.message.includes("category") ||
       boqError.message.includes("subcategory") ||
       boqError.message.includes("classification_subcategory") ||
+      boqError.message.includes("classification_system") ||
+      boqError.message.includes("classification_category") ||
       boqError.message.includes("classification_confidence") ||
       boqError.message.includes("classification_reason") ||
       boqError.message.includes("classification_source") ||
+      boqError.message.includes("user_corrected") ||
       boqError.message.includes("classification_status") ||
       boqError.message.includes("cleanup_reason") ||
       boqError.message.includes("inherited_category") ||
@@ -1921,6 +1949,7 @@ async function updateBoqItemClassification({
   const takeoffUnit = normalizeTakeoffUnit(row.unit);
   const classificationSource =
     classification.source || (classification.systemName === NEEDS_REVIEW_SYSTEM ? "needs_review" : "rules");
+  const isUserCorrection = classificationSource === "user" || classificationSource === "learned";
   const needsReview =
     needsReviewOverride ??
     (classification.systemName === NEEDS_REVIEW_SYSTEM ||
@@ -1930,9 +1959,12 @@ async function updateBoqItemClassification({
       classificationSource === "needs_review");
   const basePayload = {
     category: classification.systemName,
+    classification_category: classification.categoryName,
+    classification_system: classification.systemName,
     classification_subcategory: classification.subcategoryName || null,
     confidence_score: classification.confidenceScore,
     subcategory: classification.categoryName,
+    user_corrected: isUserCorrection,
   };
   const legacyBasePayload = {
     category: classification.systemName,
@@ -1999,7 +2031,7 @@ async function updateBoqItemClassification({
       if (requireManualPersistence) {
         const { data: verificationRow, error: verificationError } = await supabase
           .from("boq_items")
-          .select("category, subcategory, classification_subcategory, classification_source")
+          .select("category, subcategory, classification_system, classification_category, classification_subcategory, classification_source, user_corrected")
           .eq("id", row.id)
           .maybeSingle();
 
@@ -2010,9 +2042,12 @@ async function updateBoqItemClassification({
         const savedClassification = verificationRow as
           | {
               category?: string | null;
+              classification_category?: string | null;
               classification_source?: string | null;
+              classification_system?: string | null;
               classification_subcategory?: string | null;
               subcategory?: string | null;
+              user_corrected?: boolean | null;
             }
           | null;
 
@@ -2020,9 +2055,10 @@ async function updateBoqItemClassification({
           savedClassification?.category !== classification.systemName ||
           savedClassification?.subcategory !== classification.categoryName ||
           savedClassification?.classification_subcategory !== classification.subcategoryName ||
-          savedClassification?.classification_source !== "learned"
+          (savedClassification?.classification_source !== "user" && savedClassification?.classification_source !== "learned") ||
+          savedClassification?.user_corrected !== true
         ) {
-          return "Manual classification was not fully persisted. Check boq_items category, subcategory, classification_subcategory, and classification_source in Supabase.";
+          return "Manual classification was not fully persisted. Check boq_items category, subcategory, classification_subcategory, classification_source, and user_corrected in Supabase.";
         }
       }
 
@@ -2039,9 +2075,12 @@ async function updateBoqItemClassification({
       error.message.includes("takeoff_quantity") ||
       error.message.includes("takeoff_unit") ||
       error.message.includes("classification_subcategory") ||
+      error.message.includes("classification_system") ||
+      error.message.includes("classification_category") ||
       error.message.includes("classification_source") ||
       error.message.includes("classification_reason") ||
       error.message.includes("needs_review") ||
+      error.message.includes("user_corrected") ||
       error.message.includes("updated_at") ||
       error.message.includes("confidence_score");
 
@@ -2088,8 +2127,8 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
 
   const boqResult = await supabase
     .from("boq_items")
-      .select(
-      "id, description, quantity, unit, amount, category, subcategory, classification_subcategory, classification_confidence, classification_reason, classification_source, needs_review, row_type, source_sheet_name, source_row_number, section_header, inherited_category, inherited_subcategory",
+    .select(
+      "id, description, quantity, unit, amount, category, subcategory, classification_system, classification_category, classification_subcategory, classification_confidence, classification_reason, classification_source, user_corrected, needs_review, row_type, source_sheet_name, source_row_number, section_header, inherited_category, inherited_subcategory",
     )
     .eq("project_id", projectId)
     .eq("user_id", user.id)
@@ -2105,9 +2144,12 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
       error.message.includes("category") ||
       error.message.includes("subcategory") ||
       error.message.includes("classification_subcategory") ||
+      error.message.includes("classification_system") ||
+      error.message.includes("classification_category") ||
       error.message.includes("classification_confidence") ||
       error.message.includes("classification_reason") ||
       error.message.includes("classification_source") ||
+      error.message.includes("user_corrected") ||
       error.message.includes("needs_review") ||
       error.message.includes("source_sheet_name") ||
       error.message.includes("source_row_number") ||
@@ -2150,18 +2192,21 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
   const classificationSources: Array<{ classification: SystemClassification; source: ClassificationSource }> = rows.map((row) => {
     const persistedSource = isClassificationSource(row.classification_source) ? row.classification_source : null;
 
-    if (persistedSource === "learned" && row.category && row.subcategory && !row.needs_review) {
+    if ((row.user_corrected === true || persistedSource === "user" || persistedSource === "learned") && row.category && row.subcategory && !row.needs_review) {
+      const systemName = row.classification_system || row.category;
+      const categoryName = row.classification_category || row.subcategory;
+
       return {
         classification: {
-          categoryName: row.subcategory,
+          categoryName,
           confidenceScore: Number(row.classification_confidence || 1),
           reason: row.classification_reason || "User confirmed this classification.",
-          source: "learned",
+          source: persistedSource === "learned" ? "learned" : "user",
           subcategoryName: row.classification_subcategory || null,
-          supplierType: classifyBoqSystem(row.description, row.category, row.subcategory, row.classification_subcategory).supplierType,
-          systemName: row.category,
+          supplierType: classifyBoqSystem(row.description, systemName, categoryName, row.classification_subcategory).supplierType,
+          systemName,
         } satisfies SystemClassification,
-        source: "learned",
+        source: persistedSource === "learned" ? "learned" : "user",
       };
     }
 
@@ -2436,7 +2481,7 @@ export async function correctBoqItemSystemClassification(formData: FormData) {
       categoryName,
       confidenceScore: 1,
       reason: "User confirmed this classification.",
-      source: "learned" as const,
+      source: "user" as const,
       subcategoryName,
       supplierType: "User corrected supplier",
       systemName,
@@ -2626,7 +2671,7 @@ export async function bulkCorrectBoqItemClassifications(formData: FormData) {
         categoryName: change?.categoryName || NEEDS_REVIEW_CATEGORY,
         confidenceScore: 1,
         reason: "Manual bulk correction",
-        source: "learned" as const,
+        source: "user" as const,
         subcategoryName: change?.subcategoryName || null,
         supplierType: "User corrected supplier",
         systemName: change?.systemName || NEEDS_REVIEW_SYSTEM,

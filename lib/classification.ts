@@ -1,4 +1,4 @@
-export type ClassificationSource = "ai" | "inherited_header" | "learned" | "needs_review" | "rules";
+export type ClassificationSource = "ai" | "inherited_header" | "learned" | "needs_review" | "rules" | "user";
 
 export type SystemClassification = {
   systemName: string;
@@ -34,7 +34,7 @@ type SystemRule = {
 export const NEEDS_REVIEW_CATEGORY = "Needs review";
 export const NEEDS_REVIEW_SUBCATEGORY = "Needs review";
 export const NEEDS_REVIEW_SYSTEM = "Needs Review";
-export const classificationSources = ["rules", "learned", "ai", "inherited_header", "needs_review"] as const;
+export const classificationSources = ["rules", "learned", "user", "ai", "inherited_header", "needs_review"] as const;
 
 const taxonomy = [
   {
