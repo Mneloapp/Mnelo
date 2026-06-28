@@ -540,6 +540,29 @@ function resolveBoqItemClassification(
     preservedManualCorrections: ReturnType<typeof buildPreservedManualClassificationMaps> | null;
   },
 ): ClassificationPrediction {
+  const exactLearningMemory = findExactClassificationLearningMemory(row.description, context.learnedClassifications);
+
+  if (exactLearningMemory) {
+    debugClassificationMemoryTrace("apply-exact-learning-memory", {
+      category: exactLearningMemory.categoryName,
+      normalizedDescription: normalizeClassificationMemoryDescription(row.description),
+      subcategory: exactLearningMemory.subcategoryName,
+      system: exactLearningMemory.systemName,
+    });
+
+    return {
+      classification_reason: exactLearningMemory.reason || "Matched verified classification learning memory.",
+      classification_source: "learned",
+      confidence_score: exactLearningMemory.confidenceScore,
+      needs_review: false,
+      predicted_category: exactLearningMemory.systemName,
+      predicted_classification_subcategory: exactLearningMemory.subcategoryName,
+      predicted_subcategory: exactLearningMemory.categoryName,
+      predicted_supplier_type: exactLearningMemory.supplierType,
+      user_corrected: true,
+    };
+  }
+
   const durableManualClassification = context.durableManualMemory
     ? findPreservedManualClassification(row, context.durableManualMemory, context.fileId)
     : null;
@@ -807,7 +830,7 @@ function getLearnedClassificationFields(learnedClassification: LearnedClassifica
   };
 }
 
-function findLearnedClassification(description: string, learnedClassifications: LearnedClassification[]) {
+function findExactClassificationLearningMemory(description: string, learnedClassifications: LearnedClassification[]) {
   const exactMemoryMatch = findClassificationMemoryMatch(
     description,
     learnedClassifications.map((classification) => ({
@@ -826,16 +849,26 @@ function findLearnedClassification(description: string, learnedClassifications: 
     })) satisfies ClassificationMemoryRecord[],
   );
 
+  if (!exactMemoryMatch) {
+    return null;
+  }
+
+  return {
+    categoryName: exactMemoryMatch.category,
+    confidenceScore: exactMemoryMatch.confidenceScore,
+    reason: `Matched classification learning memory: ${exactMemoryMatch.normalizedDescription}`,
+    source: "learned" as const,
+    subcategoryName: exactMemoryMatch.subcategory,
+    supplierType: "Learned supplier",
+    systemName: exactMemoryMatch.system,
+  } satisfies SystemClassification;
+}
+
+function findLearnedClassification(description: string, learnedClassifications: LearnedClassification[]) {
+  const exactMemoryMatch = findExactClassificationLearningMemory(description, learnedClassifications);
+
   if (exactMemoryMatch) {
-    return {
-      categoryName: exactMemoryMatch.category,
-      confidenceScore: exactMemoryMatch.confidenceScore,
-      reason: `Matched classification learning memory: ${exactMemoryMatch.normalizedDescription}`,
-      source: "learned" as const,
-      subcategoryName: exactMemoryMatch.subcategory,
-      supplierType: "Learned supplier",
-      systemName: exactMemoryMatch.system,
-    } satisfies SystemClassification;
+    return exactMemoryMatch;
   }
 
   const tokens = Array.from(descriptionTokens(description));
@@ -1904,7 +1937,24 @@ async function applyManualClassificationsAfterParse({
       source_row_number: row.source_row_number || row.row_number || 0,
       source_sheet_name: row.source_sheet_name || row.sheet_name || "",
     } satisfies ParsedBoqRow;
+    const exactLearningMemory = findExactClassificationLearningMemory(parsedRow.description, classificationContext.learnedClassifications);
     const restoredClassification =
+      (exactLearningMemory
+        ? ({
+            category: exactLearningMemory.systemName,
+            classificationReason: exactLearningMemory.reason,
+            classificationSubcategory: exactLearningMemory.subcategoryName,
+            confidenceScore: exactLearningMemory.confidenceScore,
+            description: parsedRow.description,
+            fileId: projectFileId,
+            quantity: parsedRow.quantity,
+            rowNumber: parsedRow.source_row_number || parsedRow.row_number || null,
+            sheetName: parsedRow.source_sheet_name || parsedRow.sheet_name || null,
+            source: "learned",
+            subcategory: exactLearningMemory.categoryName,
+            unit: parsedRow.unit || null,
+          } satisfies PreservedManualClassification)
+        : null) ||
       findPreservedManualClassification(parsedRow, classificationContext.durableManualMemory, projectFileId) ||
       findPreservedManualClassification(parsedRow, classificationContext.preservedManualCorrections, projectFileId);
 
