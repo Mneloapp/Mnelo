@@ -34,8 +34,8 @@ export default async function ProjectIntelligencePage({ params }: { params: Prom
         <ProjectWorkspaceHeader project={project} />
 
         <ProjectWorkspacePanel
-          description="Break the BOQ into systems, categories and takeoff groups for procurement-ready intelligence."
-          title="Intelligence"
+          description="Review one BOQ item at a time, approve AI suggestions, and teach Mnelo classification memory."
+          title="Classification Review"
         >
           <ProjectSystemsPanel projectId={project.id} systems={systems} />
           {showSystemsError ? (

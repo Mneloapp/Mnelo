@@ -1,13 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   AlertCircle,
   Brain,
   CheckCircle2,
-  ChevronRight,
-  Lightbulb,
   Save,
   Search,
   Sparkles,
@@ -44,6 +42,8 @@ type FlatSystemRow = {
 type SimilarCandidate = FlatSystemRow & {
   match: SimilarItemMatch;
 };
+
+type SavedState = "idle" | "saving" | "saved";
 
 function defaultSubcategoryForDraft(systemName: string, categoryName: string) {
   if (categoryName === NEEDS_REVIEW_CATEGORY || systemName === NEEDS_REVIEW_SYSTEM) {
@@ -196,89 +196,202 @@ export function ClassificationSuggestion({
   );
 }
 
-export function CategoryPicker({
-  categoryName,
+export function SearchableClassificationPicker({
+  label,
   onChange,
-  systemName,
+  options,
+  placeholder,
+  value,
 }: {
-  categoryName: string;
-  onChange: (categoryName: string) => void;
-  systemName: string;
+  label: string;
+  onChange: (value: string) => void;
+  options: string[];
+  placeholder: string;
+  value: string | null;
 }) {
-  const options = categoryOptionsForSystem(systemName).filter((category) => category !== NEEDS_REVIEW_CATEGORY);
+  const [query, setQuery] = useState("");
+  const filteredOptions = options.filter((option) => option.toLowerCase().includes(query.trim().toLowerCase())).slice(0, 8);
 
   return (
-    <div className="grid gap-2">
-      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#64748b]">Choose category</p>
-      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-        {options.map((category) => {
-          const selected = category === categoryName;
+    <div className="rounded-2xl border border-[#e5e7eb] bg-white p-3">
+      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#64748b]">{label}</p>
+      <input
+        className="mt-2 h-10 w-full rounded-xl border border-[#e5e7eb] bg-[#f8fafc] px-3 text-sm font-semibold text-[#0f172a] outline-none transition placeholder:text-[#94a3b8] focus:border-[#16a34a] focus:ring-4 focus:ring-[#dcfce7]"
+        onChange={(event) => setQuery(event.currentTarget.value)}
+        placeholder={value || placeholder}
+        value={query}
+      />
+      <div className="mt-2 grid max-h-52 gap-1 overflow-y-auto pr-1">
+        {filteredOptions.length > 0 ? (
+          filteredOptions.map((option) => {
+            const selected = option === value;
 
-          return (
-            <button
-              className={`rounded-2xl border p-3 text-left text-sm font-semibold transition ${
-                selected
-                  ? "border-[#16a34a] bg-[#ecfdf3] text-[#087a36] shadow-[0_12px_28px_rgba(22,163,74,0.12)]"
-                  : "border-[#e5e7eb] bg-white text-[#0f172a] hover:border-[#bbf7d0] hover:bg-[#f8faf8]"
-              }`}
-              key={category}
-              onClick={() => onChange(category)}
-              type="button"
-            >
-              {category}
-            </button>
-          );
-        })}
+            return (
+              <button
+                className={`rounded-xl px-3 py-2 text-left text-sm font-semibold transition ${
+                  selected ? "bg-[#ecfdf3] text-[#087a36]" : "text-[#334155] hover:bg-[#f8fafc]"
+                }`}
+                key={option}
+                onClick={() => {
+                  onChange(option);
+                  setQuery("");
+                }}
+                type="button"
+              >
+                {option}
+              </button>
+            );
+          })
+        ) : (
+          <p className="px-3 py-2 text-sm text-[#94a3b8]">No matches.</p>
+        )}
       </div>
     </div>
   );
 }
 
-export function SubcategoryPicker({
-  categoryName,
-  onChange,
-  subcategoryName,
-  systemName,
+export function RecentlyUsedClassifications({
+  onSelect,
+  recent,
 }: {
-  categoryName: string;
-  onChange: (subcategoryName: string) => void;
-  subcategoryName: string | null;
-  systemName: string;
+  onSelect: (draft: DraftChange) => void;
+  recent: DraftChange[];
 }) {
-  const options = getSubcategoryOptions(systemName, categoryName);
-
-  if (categoryName === NEEDS_REVIEW_CATEGORY || options.length === 0) {
-    return (
-      <div className="rounded-2xl border border-dashed border-[#cbd5e1] bg-[#f8fafc] p-4 text-sm leading-6 text-[#64748b]">
-        Choose a category first. Mnelo will not auto-select the first subcategory for you.
-      </div>
-    );
+  if (recent.length === 0) {
+    return null;
   }
 
   return (
-    <div className="grid gap-2">
-      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#64748b]">Choose subcategory</p>
-      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-        {options.map((subcategory) => {
-          const selected = subcategory === subcategoryName;
-
-          return (
-            <button
-              className={`rounded-2xl border p-3 text-left text-sm font-semibold transition ${
-                selected
-                  ? "border-[#16a34a] bg-[#ecfdf3] text-[#087a36] shadow-[0_12px_28px_rgba(22,163,74,0.12)]"
-                  : "border-[#e5e7eb] bg-white text-[#0f172a] hover:border-[#bbf7d0] hover:bg-[#f8faf8]"
-              }`}
-              key={subcategory}
-              onClick={() => onChange(subcategory)}
-              type="button"
-            >
-              {subcategory}
-            </button>
-          );
-        })}
+    <div className="rounded-2xl border border-[#e5e7eb] bg-white p-3">
+      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#64748b]">Recently used</p>
+      <div className="mt-2 grid gap-2">
+        {recent.slice(0, 4).map((draft) => (
+          <button
+            className="rounded-xl bg-[#f8fafc] px-3 py-2 text-left text-xs font-semibold text-[#334155] transition hover:bg-[#ecfdf3] hover:text-[#087a36]"
+            key={`${draft.systemName}-${draft.categoryName}-${draft.subcategoryName}`}
+            onClick={() => onSelect(draft)}
+            type="button"
+          >
+            {draft.systemName} / {draft.categoryName} / {draft.subcategoryName || "Needs review"}
+          </button>
+        ))}
       </div>
     </div>
+  );
+}
+
+export function SavedStateIndicator({ state }: { state: SavedState }) {
+  if (state === "saving") {
+    return <span className="rounded-full bg-[#f8fafc] px-3 py-1 text-xs font-semibold text-[#64748b]">Saving...</span>;
+  }
+
+  if (state === "saved") {
+    return <span className="rounded-full bg-[#ecfdf3] px-3 py-1 text-xs font-semibold text-[#087a36]">Saved</span>;
+  }
+
+  return <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-[#94a3b8] ring-1 ring-[#e5e7eb]">Ready</span>;
+}
+
+export function KeyboardShortcutsHint() {
+  return (
+    <div className="rounded-2xl border border-[#e5e7eb] bg-white p-3 text-xs leading-6 text-[#64748b]">
+      <span className="font-semibold text-[#0f172a]">Shortcuts:</span> Enter approve · S skip · N needs review · Ctrl/Cmd+K
+      search · ←/→ previous/next · Esc close panel
+    </div>
+  );
+}
+
+export function ClassificationEditorPanel({
+  draft,
+  isSaving,
+  onAutoSave,
+  onChangeDraft,
+  recentClassifications,
+  savedState,
+}: {
+  draft: DraftChange;
+  isSaving: boolean;
+  onAutoSave: (draft: DraftChange) => void;
+  onChangeDraft: (patch: Partial<DraftChange>) => void;
+  recentClassifications: DraftChange[];
+  savedState: SavedState;
+}) {
+  const systemNames = systemOptions.map((option) => option.systemName);
+  const categories = categoryOptionsForSystem(draft.systemName).filter((category) => category !== NEEDS_REVIEW_CATEGORY);
+  const subcategories =
+    draft.categoryName && draft.categoryName !== NEEDS_REVIEW_CATEGORY ? getSubcategoryOptions(draft.systemName, draft.categoryName) : [];
+
+  function selectRecent(nextDraft: DraftChange) {
+    onChangeDraft(nextDraft);
+    onAutoSave(normalizeDraftChange(nextDraft));
+  }
+
+  return (
+    <aside className="grid content-start gap-3 rounded-[20px] border border-[#e5e7eb] bg-[#fbfdfb] p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#64748b]">Classification</p>
+          <p className="mt-1 text-sm text-[#64748b]">Search, select, and continue.</p>
+        </div>
+        <SavedStateIndicator state={isSaving ? "saving" : savedState} />
+      </div>
+
+      <RecentlyUsedClassifications onSelect={selectRecent} recent={recentClassifications} />
+
+      <SearchableClassificationPicker
+        label="System"
+        onChange={(systemName) =>
+          onChangeDraft({
+            categoryName: NEEDS_REVIEW_CATEGORY,
+            needsReview: true,
+            subcategoryName: null,
+            systemName,
+          })
+        }
+        options={systemNames}
+        placeholder="Search system..."
+        value={draft.systemName}
+      />
+
+      <SearchableClassificationPicker
+        label="Category"
+        onChange={(categoryName) =>
+          onChangeDraft({
+            categoryName,
+            needsReview: true,
+            subcategoryName: null,
+          })
+        }
+        options={categories}
+        placeholder="Search category..."
+        value={draft.categoryName === NEEDS_REVIEW_CATEGORY ? null : draft.categoryName}
+      />
+
+      {draft.categoryName === NEEDS_REVIEW_CATEGORY ? (
+        <div className="rounded-2xl border border-dashed border-[#cbd5e1] bg-white p-4 text-sm leading-6 text-[#64748b]">
+          Choose a category to show matching subcategories. Mnelo will not select the first option automatically.
+        </div>
+      ) : (
+        <SearchableClassificationPicker
+          label="Subcategory"
+          onChange={(subcategoryName) => {
+            const nextDraft = normalizeDraftChange({
+              ...draft,
+              needsReview: false,
+              subcategoryName,
+            });
+
+            onChangeDraft(nextDraft);
+            onAutoSave(nextDraft);
+          }}
+          options={subcategories}
+          placeholder="Search subcategory..."
+          value={draft.subcategoryName}
+        />
+      )}
+
+      <KeyboardShortcutsHint />
+    </aside>
   );
 }
 
@@ -288,12 +401,14 @@ export function ReviewActions({
   onApprove,
   onMarkNeedsReview,
   onSave,
+  onSkip,
 }: {
   canContinue: boolean;
   isSaving: boolean;
   onApprove: () => void;
   onMarkNeedsReview: () => void;
   onSave: () => void;
+  onSkip: () => void;
 }) {
   return (
     <div className="flex flex-col gap-2 border-t border-[#e5e7eb] pt-4 sm:flex-row sm:items-center sm:justify-between">
@@ -304,7 +419,7 @@ export function ReviewActions({
         type="button"
       >
         <CheckCircle2 aria-hidden="true" className="mr-2 h-4 w-4" strokeWidth={2} />
-        {isSaving ? "Saving..." : "Approve & Continue"}
+        {isSaving ? "Saving..." : "Approve & Next"}
       </button>
       <div className="flex flex-col gap-2 sm:flex-row">
         <button
@@ -315,6 +430,14 @@ export function ReviewActions({
         >
           <Save aria-hidden="true" className="mr-2 h-4 w-4" strokeWidth={2} />
           Save Changes
+        </button>
+        <button
+          className="inline-flex h-11 items-center justify-center rounded-[14px] bg-white px-4 text-sm font-semibold text-[#64748b] ring-1 ring-[#e5e7eb] transition hover:bg-[#f8fafc] disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={isSaving}
+          onClick={onSkip}
+          type="button"
+        >
+          Skip
         </button>
         <button
           className="inline-flex h-11 items-center justify-center rounded-[14px] bg-[#fff7ed] px-4 text-sm font-semibold text-[#c2410c] ring-1 ring-[#fed7aa] transition hover:bg-[#ffedd5] disabled:cursor-not-allowed disabled:opacity-60"
@@ -330,31 +453,42 @@ export function ReviewActions({
 }
 
 export function ClassificationReview({
+  currentIndex,
   draft,
   item,
   onApprove,
+  onAutoSave,
   onChangeDraft,
   onMarkNeedsReview,
   onSave,
   onSelectSimilar,
+  onSkip,
+  recentClassifications,
+  savedState,
   similarCount,
+  totalCount,
   system,
   category,
   isSaving,
 }: {
   category: ProjectSystemCategory;
+  currentIndex: number;
   draft: DraftChange;
   isSaving: boolean;
   item: SystemBoqItem;
   onApprove: () => void;
+  onAutoSave: (draft: DraftChange) => void;
   onChangeDraft: (patch: Partial<DraftChange>) => void;
   onMarkNeedsReview: () => void;
   onSave: () => void;
   onSelectSimilar: () => void;
+  onSkip: () => void;
+  recentClassifications: DraftChange[];
+  savedState: SavedState;
   similarCount: number;
   system: ProjectSystemSummary;
+  totalCount: number;
 }) {
-  const [isChanging, setIsChanging] = useState(false);
   const canSave = Boolean(draft.systemName && draft.categoryName && (draft.needsReview || draft.subcategoryName));
 
   return (
@@ -362,7 +496,9 @@ export function ClassificationReview({
       <div className="flex flex-col gap-4 border-b border-[#e5e7eb] pb-5 lg:flex-row lg:items-start lg:justify-between">
         <div className="max-w-3xl">
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#16a34a]">Classification Review</p>
-          <h3 className="mt-2 text-2xl font-semibold tracking-tight text-[#0f172a]">Teach Mnelo one decision at a time.</h3>
+          <h3 className="mt-2 text-2xl font-semibold tracking-tight text-[#0f172a]">
+            Item {currentIndex + 1} / {totalCount}
+          </h3>
           <p className="mt-2 text-sm leading-6 text-[#64748b]">
             Approve the AI suggestion or adjust it. Saved corrections update Mnelo memory for future BOQs.
           </p>
@@ -378,7 +514,7 @@ export function ClassificationReview({
         </button>
       </div>
 
-      <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_22rem]">
+      <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_24rem]">
         <div className="grid gap-4">
           <div className="rounded-2xl border border-[#e5e7eb] bg-[#f8fafc] p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#64748b]">Item description</p>
@@ -406,77 +542,17 @@ export function ClassificationReview({
 
           <ClassificationSuggestion draft={draft} item={item} />
           <AIReason reason={item.classificationReason} />
-
-          {isChanging ? (
-            <div className="grid gap-5 rounded-2xl border border-[#e5e7eb] bg-white p-4">
-              <div className="grid gap-2">
-                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#64748b]">Choose system</p>
-                <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                  {systemOptions.map((option) => {
-                    const selected = option.systemName === draft.systemName;
-
-                    return (
-                      <button
-                        className={`rounded-2xl border p-3 text-left text-sm font-semibold transition ${
-                          selected
-                            ? "border-[#16a34a] bg-[#ecfdf3] text-[#087a36]"
-                            : "border-[#e5e7eb] bg-white text-[#0f172a] hover:border-[#bbf7d0] hover:bg-[#f8faf8]"
-                        }`}
-                        key={option.systemName}
-                        onClick={() => {
-                          onChangeDraft({
-                            categoryName: NEEDS_REVIEW_CATEGORY,
-                            subcategoryName: null,
-                            systemName: option.systemName,
-                          });
-                        }}
-                        type="button"
-                      >
-                        {option.systemName}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-              <CategoryPicker
-                categoryName={draft.categoryName}
-                onChange={(nextCategory) =>
-                  onChangeDraft({
-                    categoryName: nextCategory,
-                    subcategoryName: null,
-                  })
-                }
-                systemName={draft.systemName}
-              />
-              <SubcategoryPicker
-                categoryName={draft.categoryName}
-                onChange={(nextSubcategory) => onChangeDraft({ subcategoryName: nextSubcategory })}
-                subcategoryName={draft.subcategoryName}
-                systemName={draft.systemName}
-              />
-            </div>
-          ) : (
-            <button
-              className="inline-flex h-11 items-center justify-center rounded-[14px] bg-white px-4 text-sm font-semibold text-[#0f172a] ring-1 ring-[#e5e7eb] transition hover:bg-[#f8fafc]"
-              onClick={() => setIsChanging(true)}
-              type="button"
-            >
-              Change category or subcategory
-              <ChevronRight aria-hidden="true" className="ml-2 h-4 w-4" strokeWidth={2} />
-            </button>
-          )}
         </div>
 
-        <div className="grid content-start gap-3 rounded-2xl border border-[#e5e7eb] bg-[#fbfdfb] p-4">
-          <div className="flex items-start gap-3 rounded-2xl bg-white p-4 ring-1 ring-[#e5e7eb]">
-            <Lightbulb aria-hidden="true" className="mt-0.5 h-5 w-5 text-[#7c3aed]" strokeWidth={2} />
-            <div>
-              <p className="text-sm font-semibold text-[#0f172a]">Learning memory</p>
-              <p className="mt-1 text-sm leading-6 text-[#64748b]">
-                When you approve this, Mnelo can reuse the decision on matching descriptions after reparse and future uploads.
-              </p>
-            </div>
-          </div>
+        <div className="grid gap-3">
+          <ClassificationEditorPanel
+            draft={draft}
+            isSaving={isSaving}
+            onAutoSave={onAutoSave}
+            onChangeDraft={onChangeDraft}
+            recentClassifications={recentClassifications}
+            savedState={savedState}
+          />
           <div className="rounded-2xl bg-white p-4 ring-1 ring-[#e5e7eb]">
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#64748b]">Takeoff</p>
             <p className="mt-2 text-sm font-semibold text-[#0f172a]">
@@ -499,6 +575,7 @@ export function ClassificationReview({
           onApprove={onApprove}
           onMarkNeedsReview={onMarkNeedsReview}
           onSave={onSave}
+          onSkip={onSkip}
         />
       </div>
     </div>
@@ -513,6 +590,7 @@ export function ProjectSystemsPanel({
   systems: ProjectSystemSummary[];
 }) {
   const router = useRouter();
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [isClassifying, setIsClassifying] = useState(false);
   const [isSavingBulk, setIsSavingBulk] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -520,6 +598,8 @@ export function ProjectSystemsPanel({
   const [drafts, setDrafts] = useState<Record<string, DraftChange>>({});
   const [selectedSimilarIds, setSelectedSimilarIds] = useState<string[]>([]);
   const [savedOverrides, setSavedOverrides] = useState<Record<string, DraftChange>>({});
+  const [recentClassifications, setRecentClassifications] = useState<DraftChange[]>([]);
+  const [savedState, setSavedState] = useState<SavedState>("idle");
   const [showSimilarReview, setShowSimilarReview] = useState(false);
   const [notice, setNotice] = useState<{ tone: "success" | "error"; message: string } | null>(null);
   const [systemFilter, setSystemFilter] = useState("all");
@@ -581,6 +661,7 @@ export function ProjectSystemsPanel({
     });
   }, [allRows, categoryFilter, needsReviewOnly, search, sourceFilter, systemFilter]);
   const focusedRow = filteredRows.find((row) => row.item.id === activeItemId) || filteredRows[0] || null;
+  const focusedIndex = focusedRow ? filteredRows.findIndex((row) => row.item.id === focusedRow.item.id) : -1;
   const dirtyCount = Object.keys(drafts).length;
   const sourceSummary = useMemo(() => {
     const counts = sourceSummaryOrder.reduce(
@@ -617,11 +698,12 @@ export function ProjectSystemsPanel({
       counts,
       highConfidenceCount,
       refinementQueueCount,
+      needsReviewCount: allRows.filter((row) => row.item.needsReview).length,
       total: allRows.length,
     };
   }, [allRows]);
-  const confidencePercent =
-    sourceSummary.total > 0 ? Math.round((sourceSummary.highConfidenceCount / sourceSummary.total) * 100) : 0;
+  const reviewedCount = Math.max(0, sourceSummary.total - sourceSummary.needsReviewCount);
+  const reviewedPercent = sourceSummary.total > 0 ? Math.round((reviewedCount / sourceSummary.total) * 100) : 0;
 
   function displayDraft(row: FlatSystemRow) {
     return drafts[row.item.id] || savedOverrides[row.item.id] || draftForItem(row.item, row.system.name, row.category.name);
@@ -638,6 +720,7 @@ export function ProjectSystemsPanel({
     const nextDraft = { ...current, ...patch };
     const next = "systemName" in patch || "categoryName" in patch || "subcategoryName" in patch ? normalizeDraftChange(nextDraft) : nextDraft;
 
+    setSavedState("idle");
     setDrafts((previous) => ({
       ...previous,
       [itemId]: next,
@@ -648,6 +731,24 @@ export function ProjectSystemsPanel({
     const index = filteredRows.findIndex((row) => row.item.id === itemId);
 
     return filteredRows[index + 1] || filteredRows[index] || filteredRows[0] || null;
+  }
+
+  function previousRowBefore(itemId: string) {
+    const index = filteredRows.findIndex((row) => row.item.id === itemId);
+
+    return filteredRows[Math.max(0, index - 1)] || filteredRows[0] || null;
+  }
+
+  function rememberClassification(draft: DraftChange) {
+    if (!hasCompleteDraftClassification(draft)) {
+      return;
+    }
+
+    setRecentClassifications((previous) => {
+      const key = `${draft.systemName}-${draft.categoryName}-${draft.subcategoryName}`;
+      const next = [draft, ...previous.filter((entry) => `${entry.systemName}-${entry.categoryName}-${entry.subcategoryName}` !== key)];
+      return next.slice(0, 6);
+    });
   }
 
   async function saveDrafts(itemIds: string[], successMessage: string, continueAfterSave = false, forcedDraft?: DraftChange) {
@@ -676,6 +777,7 @@ export function ProjectSystemsPanel({
 
     setIsSaving(true);
     setNotice(null);
+    setSavedState("saving");
 
     try {
       const formData = new FormData();
@@ -687,6 +789,7 @@ export function ProjectSystemsPanel({
         const message = result.error || "Could not save manual classifications.";
         console.error(message);
         setNotice({ tone: "error", message });
+        setSavedState("idle");
         return;
       }
 
@@ -704,14 +807,24 @@ export function ProjectSystemsPanel({
       );
 
       setSavedOverrides((previous) => ({ ...previous, ...savedDrafts }));
+      changes.forEach((change) =>
+        rememberClassification({
+          categoryName: change.categoryName,
+          needsReview: change.needsReview,
+          subcategoryName: change.subcategoryName,
+          systemName: change.systemName,
+        }),
+      );
       setDrafts((previous) => Object.fromEntries(Object.entries(previous).filter(([itemId]) => !itemIds.includes(itemId))));
       setNotice({ tone: "success", message: successMessage });
+      setSavedState("saved");
 
       if (continueAfterSave && itemIds[0]) {
         setActiveItemId(nextRowAfter(itemIds[0])?.item.id || null);
       }
     } catch (error) {
       console.error(error);
+      setSavedState("idle");
       setNotice({
         tone: "error",
         message: error instanceof Error ? error.message : "Unknown classification error.",
@@ -740,6 +853,85 @@ export function ProjectSystemsPanel({
       setIsSavingBulk(false);
     }
   }
+
+  function approveFocusedRow() {
+    if (!focusedRow) {
+      return;
+    }
+
+    const approvedDraft = normalizeDraftChange({ ...displayDraft(focusedRow), needsReview: false });
+    updateDraft(focusedRow.item.id, approvedDraft);
+    void saveDrafts([focusedRow.item.id], "Classification saved. AI memory updated.", true, approvedDraft);
+  }
+
+  function markFocusedNeedsReview() {
+    if (!focusedRow) {
+      return;
+    }
+
+    const reviewDraft = { ...displayDraft(focusedRow), needsReview: true };
+    updateDraft(focusedRow.item.id, reviewDraft);
+    void saveDrafts([focusedRow.item.id], "Classification saved. This item remains in review.", false, reviewDraft);
+  }
+
+  function skipFocusedRow() {
+    if (!focusedRow) {
+      return;
+    }
+
+    setActiveItemId(nextRowAfter(focusedRow.item.id)?.item.id || null);
+  }
+
+  function autoSaveFocusedRow(nextDraft: DraftChange) {
+    if (!focusedRow || !hasCompleteDraftClassification(nextDraft)) {
+      return;
+    }
+
+    void saveDrafts([focusedRow.item.id], "Saved", false, nextDraft);
+  }
+
+  useEffect(() => {
+    function isEditableTarget(target: EventTarget | null) {
+      return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement;
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+        return;
+      }
+
+      if (event.key === "Escape") {
+        setShowSimilarReview(false);
+        return;
+      }
+
+      if (isEditableTarget(event.target)) {
+        return;
+      }
+
+      if (event.key === "Enter") {
+        event.preventDefault();
+        approveFocusedRow();
+      } else if (event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        skipFocusedRow();
+      } else if (event.key.toLowerCase() === "n") {
+        event.preventDefault();
+        markFocusedNeedsReview();
+      } else if (event.key === "ArrowRight" && focusedRow) {
+        event.preventDefault();
+        setActiveItemId(nextRowAfter(focusedRow.item.id)?.item.id || null);
+      } else if (event.key === "ArrowLeft" && focusedRow) {
+        event.preventDefault();
+        setActiveItemId(previousRowBefore(focusedRow.item.id)?.item.id || null);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  });
 
   const similarCandidates = useMemo(() => {
     if (!focusedRow) {
@@ -816,9 +1008,12 @@ export function ProjectSystemsPanel({
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#087a36]">Review progress</p>
-              <p className="mt-2 text-2xl font-semibold text-[#07130f]">{confidencePercent}%</p>
+              <p className="mt-2 text-2xl font-semibold text-[#07130f]">
+                Reviewed {reviewedCount.toLocaleString()} / {sourceSummary.total.toLocaleString()}
+              </p>
               <p className="mt-1 text-sm text-[#64748b]">
-                {sourceSummary.highConfidenceCount.toLocaleString()} of {sourceSummary.total.toLocaleString()} rows are high confidence.
+                Needs Review: {sourceSummary.needsReviewCount.toLocaleString()} · Auto-classified:{" "}
+                {sourceSummary.highConfidenceCount.toLocaleString()}
               </p>
             </div>
             <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-[#087a36] ring-1 ring-[#bbf7d0]">
@@ -826,7 +1021,7 @@ export function ProjectSystemsPanel({
             </span>
           </div>
           <div className="mt-4 h-2 overflow-hidden rounded-full bg-white">
-            <div className="h-full rounded-full bg-[#16a34a] transition-all" style={{ width: `${confidencePercent}%` }} />
+            <div className="h-full rounded-full bg-[#16a34a] transition-all" style={{ width: `${reviewedPercent}%` }} />
           </div>
           <p className="mt-3 text-xs text-[#64748b]">
             Approvals update classification memory. Learned/manual rows stay protected during future runs.
@@ -851,6 +1046,7 @@ export function ProjectSystemsPanel({
         <label className="relative block">
           <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#94a3b8]" />
           <input
+            ref={searchInputRef}
             className="h-10 w-full rounded-xl border border-[#e5e7eb] bg-white pl-9 pr-3 text-sm outline-none transition placeholder:text-[#94a3b8] focus:border-[#16a34a] focus:ring-4 focus:ring-[#dcfce7]"
             onChange={(event) => setSearch(event.currentTarget.value)}
             placeholder="Search item description..."
@@ -922,20 +1118,14 @@ export function ProjectSystemsPanel({
         <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_24rem]">
           <ClassificationReview
             category={focusedRow.category}
+            currentIndex={Math.max(0, focusedIndex)}
             draft={displayDraft(focusedRow)}
             isSaving={isSaving}
             item={focusedRow.item}
-            onApprove={() => {
-              const approvedDraft = normalizeDraftChange({ ...displayDraft(focusedRow), needsReview: false });
-              updateDraft(focusedRow.item.id, approvedDraft);
-              void saveDrafts([focusedRow.item.id], "Classification saved. AI memory updated.", true, approvedDraft);
-            }}
+            onApprove={approveFocusedRow}
+            onAutoSave={autoSaveFocusedRow}
             onChangeDraft={(patch) => updateDraft(focusedRow.item.id, patch)}
-            onMarkNeedsReview={() => {
-              const reviewDraft = { ...displayDraft(focusedRow), needsReview: true };
-              updateDraft(focusedRow.item.id, reviewDraft);
-              void saveDrafts([focusedRow.item.id], "Classification saved. This item remains in review.", false, reviewDraft);
-            }}
+            onMarkNeedsReview={markFocusedNeedsReview}
             onSave={() => void saveDrafts([focusedRow.item.id], "Classification saved. AI memory updated.")}
             onSelectSimilar={() => {
               if (similarCandidates.length === 0) {
@@ -946,8 +1136,12 @@ export function ProjectSystemsPanel({
               setSelectedSimilarIds([]);
               setShowSimilarReview(true);
             }}
+            onSkip={skipFocusedRow}
+            recentClassifications={recentClassifications}
+            savedState={savedState}
             similarCount={similarCandidates.length}
             system={focusedRow.system}
+            totalCount={filteredRows.length}
           />
 
           {showSimilarReview ? (

@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { Brain, FileText, Plus, Settings } from "lucide-react";
-import { ProjectStageFlow } from "@/components/project-pipeline/project-stage-flow";
+import { ProjectWorkspaceNav } from "@/components/project-workspace-nav";
 import type { Project } from "@/lib/data";
 
-export function ProjectWorkspaceHeader({ completedStages = 0, project }: { completedStages?: number; project: Project }) {
+export function ProjectWorkspaceHeader({ project }: { project: Project }) {
   return (
     <>
       <header className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
@@ -25,7 +25,7 @@ export function ProjectWorkspaceHeader({ completedStages = 0, project }: { compl
         </Link>
       </header>
 
-      <ProjectStageFlow completedStages={completedStages} projectId={project.id} />
+      <ProjectWorkspaceNav projectId={project.id} />
     </>
   );
 }

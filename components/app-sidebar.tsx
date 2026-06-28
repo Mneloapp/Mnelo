@@ -2,18 +2,22 @@ import Link from "next/link";
 import {
   BookOpen,
   BriefcaseBusiness,
-  ClipboardCheck,
-  Settings,
+  FileStack,
+  Handshake,
+  Home,
+  PackageCheck,
   Sparkles,
 } from "lucide-react";
 import { logout } from "@/app/auth/actions";
 import { MneloLogo } from "@/components/MneloLogo";
 
 const navItems = [
-  { label: "Projects", href: "/projects", icon: BriefcaseBusiness },
-  { label: "Current Work", href: "/dashboard", icon: ClipboardCheck },
+  { label: "Home", href: "/dashboard", icon: Home },
+  { label: "Missions", href: "/projects", icon: BriefcaseBusiness },
+  { label: "Packages", href: "/boq", icon: PackageCheck },
+  { label: "Suppliers", href: "/files", icon: Handshake },
+  { label: "Contracts", href: "/settings", icon: FileStack },
   { label: "Knowledge", href: "/learning", icon: BookOpen },
-  { label: "Settings", href: "/settings", icon: Settings },
 ];
 
 export function AppSidebar({
