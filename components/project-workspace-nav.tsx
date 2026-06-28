@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 const workspaceRoutes = [
   { label: "Overview", segment: "" },
   { label: "Requirements", segment: "requirements" },
+  { label: "AI Review", segment: "classification-review" },
   { disabled: true, label: "Packages", segment: "packages" },
   { disabled: true, label: "RFQs", segment: "rfqs" },
   { disabled: true, label: "Quotes", segment: "quotes" },
