@@ -289,6 +289,7 @@ function boqRowDescriptionFingerprint(row: { description: string; fileId?: strin
 }
 
 function buildPreservedManualClassificationMaps(preserved: PreservedManualClassification[]) {
+  const all: PreservedManualClassification[] = [];
   const strict = new Map<string, PreservedManualClassification>();
   const sheetContent = new Map<string, PreservedManualClassification>();
   const content = new Map<string, PreservedManualClassification>();
@@ -324,6 +325,7 @@ function buildPreservedManualClassificationMaps(preserved: PreservedManualClassi
   };
 
   for (const classification of preserved) {
+    all.push(classification);
     strict.set(boqRowStrictFingerprint(classification), classification);
     sheetContent.set(boqRowSheetContentFingerprint(classification), classification);
     content.set(boqRowContentFingerprint(classification), classification);
@@ -344,6 +346,7 @@ function buildPreservedManualClassificationMaps(preserved: PreservedManualClassi
   }
 
   return {
+    all,
     content,
     description,
     descriptionCounts,
@@ -354,6 +357,88 @@ function buildPreservedManualClassificationMaps(preserved: PreservedManualClassi
     sheetContent,
     strict,
   };
+}
+
+function manualMemorySimilarity(row: ParsedBoqRow, classification: PreservedManualClassification, fileId?: string | null) {
+  const rowDescription = normalizeFingerprintText(row.description);
+  const classificationDescription = normalizeFingerprintText(classification.description);
+
+  if (!rowDescription || !classificationDescription) {
+    return 0;
+  }
+
+  if (rowDescription === classificationDescription) {
+    return 1;
+  }
+
+  let score = 0;
+
+  if (rowDescription.includes(classificationDescription) || classificationDescription.includes(rowDescription)) {
+    score = 0.92;
+  } else {
+    const rowTokens = Array.from(descriptionTokens(row.description));
+    const classificationTokens = Array.from(descriptionTokens(classification.description));
+    const tokenUniverse = new Set([...rowTokens, ...classificationTokens]);
+    const directHits = rowTokens.filter((token) => classificationTokens.includes(token)).length;
+    const fuzzyHits = rowTokens.reduce((total, token) => {
+      const bestTokenScore = classificationTokens.reduce(
+        (best, classificationToken) => Math.max(best, tokenSimilarity(token, classificationToken)),
+        0,
+      );
+
+      return total + bestTokenScore;
+    }, 0);
+    const coverage = rowTokens.length > 0 ? Math.max(directHits, fuzzyHits) / rowTokens.length : 0;
+    const reverseCoverage = classificationTokens.length > 0 ? directHits / classificationTokens.length : 0;
+    const jaccard = tokenUniverse.size > 0 ? directHits / tokenUniverse.size : 0;
+
+    score = coverage * 0.62 + reverseCoverage * 0.28 + jaccard * 0.1;
+  }
+
+  const rowFileId = normalizeFingerprintText(fileId);
+  const classificationFileId = normalizeFingerprintText(classification.fileId);
+  const rowSheetName = normalizeFingerprintText(row.source_sheet_name || row.sheet_name);
+  const classificationSheetName = normalizeFingerprintText(classification.sheetName);
+  const rowUnit = normalizeFingerprintText(row.unit);
+  const classificationUnit = normalizeFingerprintText(classification.unit);
+  const rowQuantity = normalizeFingerprintQuantity(row.quantity);
+  const classificationQuantity = normalizeFingerprintQuantity(classification.quantity);
+
+  if (rowFileId && classificationFileId && rowFileId === classificationFileId) {
+    score += 0.03;
+  }
+
+  if (rowSheetName && classificationSheetName && rowSheetName === classificationSheetName) {
+    score += 0.03;
+  }
+
+  if (rowUnit && classificationUnit && rowUnit === classificationUnit) {
+    score += 0.02;
+  }
+
+  if (rowQuantity && classificationQuantity && rowQuantity === classificationQuantity) {
+    score += 0.02;
+  }
+
+  return Math.min(1, score);
+}
+
+function findBestPreservedManualClassification(
+  row: ParsedBoqRow,
+  maps: ReturnType<typeof buildPreservedManualClassificationMaps>,
+  fileId?: string | null,
+) {
+  let bestMatch: { classification: PreservedManualClassification; score: number } | null = null;
+
+  for (const classification of maps.all) {
+    const score = manualMemorySimilarity(row, classification, fileId);
+
+    if (!bestMatch || score > bestMatch.score) {
+      bestMatch = { classification, score };
+    }
+  }
+
+  return bestMatch && bestMatch.score >= 0.88 ? bestMatch.classification : null;
 }
 
 function findPreservedManualClassification(
@@ -385,6 +470,7 @@ function findPreservedManualClassification(
     (maps.descriptionCounts.get(descriptionFingerprint) === 1 ? maps.description.get(descriptionFingerprint) : null) ||
     (maps.globalDescriptionCounts.get(globalDescriptionFingerprint) === 1 ? maps.globalDescription.get(globalDescriptionFingerprint) : null) ||
     reusableDescriptionMatch ||
+    findBestPreservedManualClassification(row, maps, fileId) ||
     null
   );
 }
