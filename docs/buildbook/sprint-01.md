@@ -82,3 +82,5 @@ Re-parse restore now matches manual corrections by file, sheet, normalized descr
 Manual corrections now also create reusable classification learning memory, so verified system/category/subcategory decisions can be reused across future projects before rules or AI run.
 
 Reparse now reads verified classification learning memory before fallback classification, preventing learned subcategories from being replaced by Needs Review.
+
+Requirement Engine architecture was introduced as the bridge between BOQ understanding, tender pricing, RFQ and procurement.
