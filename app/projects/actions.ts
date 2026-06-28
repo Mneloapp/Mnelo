@@ -293,16 +293,46 @@ function buildPreservedManualClassificationMaps(preserved: PreservedManualClassi
   const sheetContent = new Map<string, PreservedManualClassification>();
   const content = new Map<string, PreservedManualClassification>();
   const descriptionUnit = new Map<string, PreservedManualClassification>();
+  const globalDescriptionUnit = new Map<string, PreservedManualClassification | null>();
   const descriptionCounts = new Map<string, number>();
   const description = new Map<string, PreservedManualClassification>();
   const globalDescriptionCounts = new Map<string, number>();
-  const globalDescription = new Map<string, PreservedManualClassification>();
+  const globalDescription = new Map<string, PreservedManualClassification | null>();
+
+  const sameClassification = (left: PreservedManualClassification, right: PreservedManualClassification) =>
+    left.category === right.category &&
+    left.subcategory === right.subcategory &&
+    left.classificationSubcategory === right.classificationSubcategory;
+
+  const setReusableMatch = (
+    map: Map<string, PreservedManualClassification | null>,
+    key: string,
+    classification: PreservedManualClassification,
+  ) => {
+    if (!key) {
+      return;
+    }
+
+    const current = map.get(key);
+
+    if (current === undefined) {
+      map.set(key, classification);
+      return;
+    }
+
+    map.set(key, current && sameClassification(current, classification) ? current : null);
+  };
 
   for (const classification of preserved) {
     strict.set(boqRowStrictFingerprint(classification), classification);
     sheetContent.set(boqRowSheetContentFingerprint(classification), classification);
     content.set(boqRowContentFingerprint(classification), classification);
     descriptionUnit.set(boqRowDescriptionUnitFingerprint(classification), classification);
+    setReusableMatch(
+      globalDescriptionUnit,
+      [normalizeFingerprintText(classification.description), normalizeFingerprintText(classification.unit)].join("|"),
+      classification,
+    );
 
     const descriptionFingerprint = boqRowDescriptionFingerprint(classification);
     descriptionCounts.set(descriptionFingerprint, (descriptionCounts.get(descriptionFingerprint) || 0) + 1);
@@ -310,10 +340,20 @@ function buildPreservedManualClassificationMaps(preserved: PreservedManualClassi
 
     const globalDescriptionFingerprint = normalizeFingerprintText(classification.description);
     globalDescriptionCounts.set(globalDescriptionFingerprint, (globalDescriptionCounts.get(globalDescriptionFingerprint) || 0) + 1);
-    globalDescription.set(globalDescriptionFingerprint, classification);
+    setReusableMatch(globalDescription, globalDescriptionFingerprint, classification);
   }
 
-  return { content, description, descriptionCounts, descriptionUnit, globalDescription, globalDescriptionCounts, sheetContent, strict };
+  return {
+    content,
+    description,
+    descriptionCounts,
+    descriptionUnit,
+    globalDescription,
+    globalDescriptionCounts,
+    globalDescriptionUnit,
+    sheetContent,
+    strict,
+  };
 }
 
 function findPreservedManualClassification(
@@ -332,14 +372,19 @@ function findPreservedManualClassification(
 
   const descriptionFingerprint = boqRowDescriptionFingerprint(fingerprintRow);
   const globalDescriptionFingerprint = normalizeFingerprintText(row.description);
+  const globalDescriptionUnitFingerprint = [globalDescriptionFingerprint, normalizeFingerprintText(row.unit)].join("|");
+  const reusableUnitMatch = maps.globalDescriptionUnit.get(globalDescriptionUnitFingerprint);
+  const reusableDescriptionMatch = maps.globalDescription.get(globalDescriptionFingerprint);
 
   return (
     maps.strict.get(boqRowStrictFingerprint(fingerprintRow)) ||
     maps.sheetContent.get(boqRowSheetContentFingerprint(fingerprintRow)) ||
     maps.content.get(boqRowContentFingerprint(fingerprintRow)) ||
     maps.descriptionUnit.get(boqRowDescriptionUnitFingerprint(fingerprintRow)) ||
+    reusableUnitMatch ||
     (maps.descriptionCounts.get(descriptionFingerprint) === 1 ? maps.description.get(descriptionFingerprint) : null) ||
     (maps.globalDescriptionCounts.get(globalDescriptionFingerprint) === 1 ? maps.globalDescription.get(globalDescriptionFingerprint) : null) ||
+    reusableDescriptionMatch ||
     null
   );
 }
