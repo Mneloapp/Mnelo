@@ -25,6 +25,11 @@ import {
 } from "@/lib/classification";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { DocumentType } from "@/lib/data";
+import {
+  findClassificationMemoryMatch,
+  normalizeClassificationMemoryDescription,
+  type ClassificationMemoryRecord,
+} from "@/lib/classification-memory";
 
 const documentTypes = ["BOQ Excel", "Specification PDF", "Drawing PDF", "Other"] satisfies DocumentType[];
 const allowedExtensions = [".xlsx", ".xls", ".pdf"];
@@ -124,6 +129,7 @@ type PreservedManualClassification = {
   quantity: number | null;
   rowNumber: number | null;
   sheetName: string | null;
+  source: "learned" | "user";
   subcategory: string;
   unit: string | null;
 };
@@ -137,6 +143,9 @@ type LearnedClassification = {
   category?: string | null;
   confidence?: string | null;
   confidence_score?: number | null;
+  classification_category?: string | null;
+  classification_subcategory?: string | null;
+  classification_system?: string | null;
   final_classification_subcategory?: string | null;
   item_description: string | null;
   final_category?: string | null;
@@ -511,13 +520,13 @@ function manualClassificationPrediction(
 ): ClassificationPrediction {
   return {
     classification_reason: classification.classificationReason || fallbackReason,
-    classification_source: "user",
+    classification_source: classification.source,
     confidence_score: classification.confidenceScore || 1,
     needs_review: false,
     predicted_category: classification.category,
     predicted_classification_subcategory: classification.classificationSubcategory,
     predicted_subcategory: classification.subcategory,
-    predicted_supplier_type: "User corrected supplier",
+    predicted_supplier_type: classification.source === "learned" ? "Learned supplier" : "User corrected supplier",
     user_corrected: true,
   };
 }
@@ -758,6 +767,7 @@ function tokenSimilarity(left: string, right: string) {
 
 function getLearnedClassificationFields(learnedClassification: LearnedClassification) {
   const systemName =
+    learnedClassification.classification_system ||
     learnedClassification.system ||
     learnedClassification.final_system ||
     learnedClassification.user_corrected_category ||
@@ -765,12 +775,14 @@ function getLearnedClassificationFields(learnedClassification: LearnedClassifica
     learnedClassification.final_category ||
     null;
   const categoryName =
+    learnedClassification.classification_category ||
     learnedClassification.category ||
     (learnedClassification.final_system
       ? learnedClassification.final_category || learnedClassification.user_corrected_subcategory || learnedClassification.output?.category
       : learnedClassification.user_corrected_subcategory || learnedClassification.output?.category || learnedClassification.final_subcategory) ||
     null;
   const subcategoryName =
+    learnedClassification.classification_subcategory ||
     learnedClassification.subcategory ||
     learnedClassification.final_classification_subcategory ||
     (learnedClassification.final_system ? learnedClassification.final_subcategory : null) ||
@@ -796,6 +808,36 @@ function getLearnedClassificationFields(learnedClassification: LearnedClassifica
 }
 
 function findLearnedClassification(description: string, learnedClassifications: LearnedClassification[]) {
+  const exactMemoryMatch = findClassificationMemoryMatch(
+    description,
+    learnedClassifications.map((classification) => ({
+      category: classification.classification_category || classification.category || classification.final_category || null,
+      confidenceScore: classification.confidence_score,
+      normalizedDescription: classification.normalized_description || null,
+      originalDescription: classification.original_description || classification.item_description || null,
+      source: classification.source,
+      subcategory:
+        classification.classification_subcategory ||
+        classification.subcategory ||
+        classification.final_classification_subcategory ||
+        classification.final_subcategory ||
+        null,
+      system: classification.classification_system || classification.system || classification.final_system || null,
+    })) satisfies ClassificationMemoryRecord[],
+  );
+
+  if (exactMemoryMatch) {
+    return {
+      categoryName: exactMemoryMatch.category,
+      confidenceScore: exactMemoryMatch.confidenceScore,
+      reason: `Matched classification learning memory: ${exactMemoryMatch.normalizedDescription}`,
+      source: "learned" as const,
+      subcategoryName: exactMemoryMatch.subcategory,
+      supplierType: "Learned supplier",
+      systemName: exactMemoryMatch.system,
+    } satisfies SystemClassification;
+  }
+
   const tokens = Array.from(descriptionTokens(description));
   const normalizedDescription = normalizeFingerprintText(description);
   let bestMatch: {
@@ -890,7 +932,9 @@ async function getLearnedClassifications(
   const learnedClassifications: LearnedClassification[] = [];
   const { data: classificationMemory, error: classificationMemoryError } = await supabase
     .from("classification_learning_memory")
-    .select("normalized_description, original_description, system, category, subcategory, source, confidence, confidence_score")
+    .select(
+      "normalized_description, original_description, classification_system, classification_category, classification_subcategory, system, category, subcategory, source, confidence, confidence_score",
+    )
     .eq("organization_id", userId)
     .order("updated_at", { ascending: false })
     .limit(2000);
@@ -903,6 +947,9 @@ async function getLearnedClassifications(
     learnedClassifications.push(
       ...(((classificationMemory || []) as unknown) as Array<{
         category: string | null;
+        classification_category: string | null;
+        classification_subcategory: string | null;
+        classification_system: string | null;
         confidence: string | null;
         confidence_score: number | null;
         normalized_description: string | null;
@@ -912,20 +959,23 @@ async function getLearnedClassifications(
         system: string | null;
       }>).map((memory) => ({
         category: memory.category,
+        classification_category: memory.classification_category,
+        classification_subcategory: memory.classification_subcategory,
+        classification_system: memory.classification_system,
         confidence: memory.confidence,
         confidence_score: memory.confidence_score,
-        final_category: memory.category,
-        final_classification_subcategory: memory.subcategory,
-        final_subcategory: memory.subcategory,
-        final_system: memory.system,
+        final_category: memory.classification_category || memory.category,
+        final_classification_subcategory: memory.classification_subcategory || memory.subcategory,
+        final_subcategory: memory.classification_subcategory || memory.subcategory,
+        final_system: memory.classification_system || memory.system,
         item_description: memory.original_description || memory.normalized_description,
         normalized_description: memory.normalized_description,
         original_description: memory.original_description,
         source: memory.source,
-        subcategory: memory.subcategory,
-        system: memory.system,
-        user_corrected_category: memory.system,
-        user_corrected_subcategory: memory.category,
+        subcategory: memory.classification_subcategory || memory.subcategory,
+        system: memory.classification_system || memory.system,
+        user_corrected_category: memory.classification_system || memory.system,
+        user_corrected_subcategory: memory.classification_category || memory.category,
       })),
     );
   } else if (
@@ -1023,7 +1073,7 @@ function manualClassificationMemoryPayload({
   unit?: string | null;
   userId: string;
 }) {
-  const normalizedDescription = normalizeFingerprintText(description);
+  const normalizedDescription = normalizeClassificationMemoryDescription(description);
   const strictFingerprint = boqRowStrictFingerprint({
     description,
     fileId: sourceFileId,
@@ -1036,6 +1086,9 @@ function manualClassificationMemoryPayload({
   return {
     confidence_score: confidenceScore,
     feedback: reason || "Manual classification memory",
+    classification_category: subcategory,
+    classification_subcategory: classificationSubcategory,
+    classification_system: category,
     final_category: subcategory,
     final_classification_subcategory: classificationSubcategory,
     final_subcategory: classificationSubcategory,
@@ -1134,6 +1187,9 @@ async function persistManualClassificationMemory({
 function classificationLearningMemoryPayload(record: ReturnType<typeof manualClassificationMemoryPayload>) {
   return {
     category: record.final_category,
+    classification_category: record.final_category,
+    classification_subcategory: record.final_classification_subcategory || record.final_subcategory,
+    classification_system: record.final_system,
     confidence: "verified",
     confidence_score: 1,
     created_from_file_id: record.source_file_id,
@@ -1164,46 +1220,54 @@ async function persistClassificationLearningMemory({
     return;
   }
 
-  const { error } = await supabase.from("classification_learning_memory").upsert(learningRecords, {
-    onConflict: "organization_id,normalized_description,system,category,subcategory",
-  });
+  let savedCount = 0;
 
-  if (!error) {
-    debugClassificationMemoryTrace("save-learning-memory", {
-      insertedOrUpdated: learningRecords.length,
-      sample: learningRecords[0]
-        ? {
-            category: learningRecords[0].category,
-            normalizedDescription: learningRecords[0].normalized_description,
-            source: learningRecords[0].source,
-            subcategory: learningRecords[0].subcategory,
-            system: learningRecords[0].system,
-          }
-        : null,
-    });
-    return;
-  }
+  for (const record of learningRecords) {
+    const existing = await supabase
+      .from("classification_learning_memory")
+      .select("id")
+      .eq("organization_id", record.organization_id)
+      .eq("normalized_description", record.normalized_description)
+      .order("updated_at", { ascending: false })
+      .limit(1);
 
-  const canInsertFallback =
-    error.message.includes("ON CONFLICT") ||
-    error.message.includes("on conflict") ||
-    error.message.includes("unique") ||
-    error.message.includes("constraint");
-
-  if (canInsertFallback) {
-    const insertResult = await supabase.from("classification_learning_memory").insert(learningRecords);
-
-    if (!insertResult.error) {
-      debugClassificationMemoryTrace("save-learning-memory-insert-fallback", {
-        inserted: learningRecords.length,
-      });
-      return;
+    if (existing.error && !existing.error.message.includes("schema cache")) {
+      console.error(`Failed checking classification learning memory: ${existing.error.message}`);
+      continue;
     }
+
+    const existingId = Array.isArray(existing.data) ? existing.data[0]?.id : null;
+    const writeResult = existingId
+      ? await supabase.from("classification_learning_memory").update(record).eq("id", existingId)
+      : await supabase.from("classification_learning_memory").insert(record);
+
+    if (writeResult.error) {
+      if (
+        !writeResult.error.message.includes("classification_learning_memory") &&
+        !writeResult.error.message.includes("schema cache") &&
+        !writeResult.error.message.includes("PGRST")
+      ) {
+        console.error(`Failed saving classification learning memory: ${writeResult.error.message}`);
+      }
+      continue;
+    }
+
+    savedCount += 1;
   }
 
-  if (!error.message.includes("classification_learning_memory") && !error.message.includes("schema cache") && !error.message.includes("PGRST")) {
-    console.error(`Failed saving classification learning memory: ${error.message}`);
-  }
+  debugClassificationMemoryTrace("save-learning-memory", {
+    insertedOrUpdated: savedCount,
+    requested: learningRecords.length,
+    sample: learningRecords[0]
+      ? {
+          category: learningRecords[0].classification_category,
+          normalizedDescription: learningRecords[0].normalized_description,
+          source: learningRecords[0].source,
+          subcategory: learningRecords[0].classification_subcategory,
+          system: learningRecords[0].classification_system,
+        }
+      : null,
+  });
 }
 
 async function getClassificationLearningMemoryForUser({
@@ -1215,7 +1279,9 @@ async function getClassificationLearningMemoryForUser({
 }) {
   const { data, error } = await supabase
     .from("classification_learning_memory")
-    .select("normalized_description, original_description, system, category, subcategory, confidence_score, created_from_file_id")
+    .select(
+      "normalized_description, original_description, classification_system, classification_category, classification_subcategory, system, category, subcategory, confidence_score, created_from_file_id",
+    )
     .eq("organization_id", userId)
     .order("updated_at", { ascending: false })
     .limit(3000);
@@ -1230,6 +1296,9 @@ async function getClassificationLearningMemoryForUser({
 
   return (((data || []) as unknown) as Array<{
     category: string | null;
+    classification_category: string | null;
+    classification_subcategory: string | null;
+    classification_system: string | null;
     confidence_score: number | null;
     created_from_file_id: string | null;
     normalized_description: string | null;
@@ -1316,6 +1385,7 @@ async function getPreservedManualClassificationsForProject({
             : Number(row.row_number)
           : Number(row.source_row_number),
       sheetName: row.source_sheet_name || row.sheet_name || null,
+      source: "user",
       subcategory: row.classification_category || row.subcategory || NEEDS_REVIEW_CATEGORY,
       unit: row.unit || null,
     })) satisfies PreservedManualClassification[];
@@ -1410,6 +1480,7 @@ async function getPreservedManualClassificationsForProject({
         quantity: row.quantity === null || row.quantity === undefined ? null : Number(row.quantity || 0),
         rowNumber: row.source_row_number === null || row.source_row_number === undefined ? null : Number(row.source_row_number),
         sheetName: row.source_sheet_name || null,
+        source: "learned",
         subcategory: categoryName,
         unit: row.unit || null,
       } satisfies PreservedManualClassification;
@@ -1420,27 +1491,28 @@ async function getPreservedManualClassificationsForProject({
   const reusableManualClassifications = classificationLearningMemory
     .map((row): PreservedManualClassification | null => {
       if (
-        !row.system ||
-        !row.category ||
-        !row.subcategory ||
-        !isValidSystem(row.system) ||
-        !isValidCategory(row.system, row.category) ||
-        !isValidSubcategory(row.system, row.category, row.subcategory)
+        !(row.classification_system || row.system) ||
+        !(row.classification_category || row.category) ||
+        !(row.classification_subcategory || row.subcategory) ||
+        !isValidSystem(row.classification_system || row.system) ||
+        !isValidCategory(row.classification_system || row.system, row.classification_category || row.category) ||
+        !isValidSubcategory(row.classification_system || row.system, row.classification_category || row.category, row.classification_subcategory || row.subcategory)
       ) {
         return null;
       }
 
       return {
-        category: row.system,
+        category: row.classification_system || row.system || NEEDS_REVIEW_SYSTEM,
         classificationReason: "Restored from verified classification learning memory.",
-        classificationSubcategory: row.subcategory,
+        classificationSubcategory: row.classification_subcategory || row.subcategory,
         confidenceScore: Number(row.confidence_score || 1),
         description: row.original_description || row.normalized_description || "",
         fileId: row.created_from_file_id || null,
+        source: "learned",
         quantity: null,
         rowNumber: null,
         sheetName: null,
-        subcategory: row.category,
+        subcategory: row.classification_category || row.category || NEEDS_REVIEW_CATEGORY,
         unit: null,
       } satisfies PreservedManualClassification;
     })
@@ -1845,7 +1917,7 @@ async function applyManualClassificationsAfterParse({
       classification_category: restoredClassification.subcategory,
       classification_confidence: 1,
       classification_reason: restoredClassification.classificationReason || "Restored manual correction after reparse.",
-      classification_source: "user",
+      classification_source: restoredClassification.source,
       classification_subcategory: restoredClassification.classificationSubcategory,
       classification_system: restoredClassification.category,
       confidence_score: 1,
