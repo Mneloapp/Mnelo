@@ -6,13 +6,12 @@ import { usePathname } from "next/navigation";
 const workspaceRoutes = [
   { label: "Overview", segment: "" },
   { label: "Requirements", segment: "requirements" },
-  { label: "Manual Review", segment: "manual-review" },
+  { label: "Decision Center", segment: "decision-center" },
   { disabled: true, label: "Packages", segment: "packages" },
   { disabled: true, label: "RFQs", segment: "rfqs" },
   { disabled: true, label: "Quotes", segment: "quotes" },
   { disabled: true, label: "Procurement", segment: "procurement" },
   { label: "Knowledge", segment: "knowledge" },
-  { label: "Activity", segment: "activity" },
 ];
 
 export function ProjectWorkspaceNav({ projectId }: { projectId: string }) {
