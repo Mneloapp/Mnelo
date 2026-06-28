@@ -1712,6 +1712,22 @@ async function saveParsedBoqRows({
     };
   }
 
+  const manualRestoreResult = await applyManualClassificationsAfterParse({
+    classificationContext,
+    projectFileId,
+    projectId,
+    supabase,
+    userId,
+  });
+
+  if (manualRestoreResult.error) {
+    console.error(`Failed restoring manual classifications after parse: ${manualRestoreResult.error}`);
+  } else if (manualRestoreResult.restoredCount > 0) {
+    console.info(
+      `[boq-parse] restored manual classifications project=${projectId} file=${projectFileId} rows=${manualRestoreResult.restoredCount}`,
+    );
+  }
+
   const itemRows = normalizedRows.filter((row) => row.row_type === "item");
 
   if (itemRows.length === 0) {
@@ -1754,6 +1770,89 @@ async function saveParsedBoqRows({
   }
 
   return { error: null, parserSummary };
+}
+
+async function applyManualClassificationsAfterParse({
+  classificationContext,
+  projectFileId,
+  projectId,
+  supabase,
+  userId,
+}: {
+  classificationContext: {
+    durableManualMemory: ReturnType<typeof buildPreservedManualClassificationMaps>;
+    fileId: string;
+    learnedClassifications: LearnedClassification[];
+    preservedManualCorrections: ReturnType<typeof buildPreservedManualClassificationMaps>;
+  };
+  projectFileId: string;
+  projectId: string;
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+  userId: string;
+}) {
+  const result = await supabase
+    .from("boq_items")
+    .select(
+      "id, description, quantity, unit, category, subcategory, classification_subcategory, sheet_name, row_number, source_sheet_name, source_row_number, source_file_id, project_file_id, row_type",
+    )
+    .eq("project_id", projectId)
+    .eq("user_id", userId)
+    .or(`source_file_id.eq.${projectFileId},project_file_id.eq.${projectFileId}`);
+
+  if (result.error) {
+    return { error: result.error.message, restoredCount: 0 };
+  }
+
+  const rows = ((result.data || []) as BoqClassificationRow[]).filter((row) => !row.row_type || row.row_type === "item");
+  let restoredCount = 0;
+  let firstError: string | null = null;
+
+  for (const row of rows) {
+    const parsedRow = {
+      description: row.description,
+      quantity: row.quantity === null || row.quantity === undefined ? null : Number(row.quantity || 0),
+      unit: row.unit || null,
+      rate: null,
+      amount: null,
+      row_type: "item" as const,
+      sheet_name: row.source_sheet_name || row.sheet_name || "",
+      row_number: row.source_row_number || row.row_number || 0,
+      source_row_number: row.source_row_number || row.row_number || 0,
+      source_sheet_name: row.source_sheet_name || row.sheet_name || "",
+    } satisfies ParsedBoqRow;
+    const restoredClassification =
+      findPreservedManualClassification(parsedRow, classificationContext.durableManualMemory, projectFileId) ||
+      findPreservedManualClassification(parsedRow, classificationContext.preservedManualCorrections, projectFileId);
+
+    if (!restoredClassification) {
+      continue;
+    }
+
+    const updatePayload = {
+      category: restoredClassification.category,
+      classification_category: restoredClassification.subcategory,
+      classification_confidence: 1,
+      classification_reason: restoredClassification.classificationReason || "Restored manual correction after reparse.",
+      classification_source: "user",
+      classification_subcategory: restoredClassification.classificationSubcategory,
+      classification_system: restoredClassification.category,
+      confidence_score: 1,
+      needs_review: false,
+      subcategory: restoredClassification.subcategory,
+      updated_at: new Date().toISOString(),
+      user_corrected: true,
+    };
+    const updateResult = await supabase.from("boq_items").update(updatePayload).eq("id", row.id);
+
+    if (updateResult.error) {
+      firstError ||= updateResult.error.message;
+      continue;
+    }
+
+    restoredCount += 1;
+  }
+
+  return { error: firstError, restoredCount };
 }
 
 async function countParsedRowsForFile({

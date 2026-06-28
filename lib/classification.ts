@@ -101,7 +101,7 @@ const taxonomy = [
     categories: [
       {
         name: "Lighting",
-        subcategories: ["Fixtures", "Lighting Fixtures", "Emergency Lighting", "Exit Signs", "Lighting Control"],
+        subcategories: ["Fixtures", "Lighting Fixtures", "Emergency Lighting", "Exit Signs", "Lighting Control", "Light Controls"],
       },
       {
         name: "Wiring Devices",
@@ -442,6 +442,8 @@ const extraKeywordAliases = new Map<string, string[]>([
   ["Fire Dampers", ["fire damper", "სახანძრო სარქველი", "клапан противопожар"]],
   ["Fixtures", ["luminaire", "light fixture", "led panel", "led strip", "downlight", "spotlight", "projector", "emergency light", "სანათი", "светильник"]],
   ["Lighting Fixtures", ["luminaire", "light fixture", "led panel", "led strip", "downlight", "spotlight", "projector", "emergency light", "სანათი", "светильник"]],
+  ["Lighting Control", ["lighting control", "light control", "light controls", "motion sensor", "movement sensor", "occupancy sensor", "presence sensor", "pir sensor", "dimmer", "მოძრაობის სენსორი", "მოძრაობის დეტექტორი", "განათების კონტროლი"]],
+  ["Light Controls", ["lighting control", "light control", "light controls", "motion sensor", "movement sensor", "occupancy sensor", "presence sensor", "pir sensor", "dimmer", "მოძრაობის სენსორი", "მოძრაობის დეტექტორი", "განათების კონტროლი"]],
   ["Power & Control Cables", ["cable", "wire", "power cable", "control cable", "fire resistant cable", "electrical cable", "კაბელი", "კაბელ", "кабель", "провод"]],
   ["Power Cables", ["power cable", "electrical cable", "კაბელი", "კაბელ", "кабель"]],
   ["Control Cables", ["control cable", "signal cable", "საკონტროლო კაბელი"]],
@@ -537,6 +539,7 @@ const contextualSectionAliases = [
   { systemName: "Electrical", categoryName: "Containment", subcategoryName: "Cable Trays", aliases: ["საკაბელო კონსტრუქციები", "კაბელსატარი", "cable tray"] },
   { systemName: "Electrical", categoryName: "Containment", subcategoryName: "Conduits", aliases: ["ელექტრო მილი", "გოფრირებული მილი", "conduit"] },
   { systemName: "Electrical", categoryName: "Containment", subcategoryName: "Junction Boxes", aliases: ["junction box", "j-box", "j box", "გამანაწილებელი კოლოფი", "ელექტრო კოლოფი"] },
+  { systemName: "Electrical", categoryName: "Lighting", subcategoryName: "Lighting Control", aliases: ["lighting control", "light control", "motion sensor", "movement sensor", "occupancy sensor", "presence sensor", "pir sensor", "მოძრაობის სენსორი", "მოძრაობის დეტექტორი"] },
   { systemName: "Electrical", categoryName: "Wiring Devices", subcategoryName: "Sockets & Switches", aliases: ["ფურნიტურა", "როზეტი", "ჩამრთველი", "socket", "switch"] },
   { systemName: "Electrical", categoryName: "Protection", subcategoryName: "Breakers", aliases: ["ავტომატი", "breaker", "mcb", "mccb"] },
   { systemName: "Electrical", categoryName: "Earthing & Protection", subcategoryName: "Earthing", aliases: ["დამიწება", "earthing"] },
