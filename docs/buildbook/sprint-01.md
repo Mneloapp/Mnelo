@@ -80,3 +80,5 @@ Manual classification corrections are persistent and must survive re-parse. User
 Re-parse restore now matches manual corrections by file, sheet, normalized description, unit and quantity instead of row IDs.
 
 Manual corrections now also create reusable classification learning memory, so verified system/category/subcategory decisions can be reused across future projects before rules or AI run.
+
+Reparse now reads verified classification learning memory before fallback classification, preventing learned subcategories from being replaced by Needs Review.

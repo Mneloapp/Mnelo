@@ -221,6 +221,14 @@ function normalizeFingerprintText(value?: string | number | null) {
     .trim();
 }
 
+function debugClassificationMemoryTrace(event: string, details: Record<string, unknown>) {
+  if (process.env.MNELO_DEBUG_CLASSIFICATION_MEMORY !== "true") {
+    return;
+  }
+
+  console.info(`[classification-memory:${event}] ${JSON.stringify(details)}`);
+}
+
 function normalizeFingerprintQuantity(value?: number | null) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) {
     return "";
@@ -412,6 +420,13 @@ function resolveBoqItemClassification(
 
   if (learnedClassification) {
     const learnedHasSubcategory = Boolean(learnedClassification.subcategoryName);
+
+    debugClassificationMemoryTrace("apply-learned-memory", {
+      category: learnedClassification.categoryName,
+      normalizedDescription: normalizeFingerprintText(row.description),
+      subcategory: learnedClassification.subcategoryName,
+      system: learnedClassification.systemName,
+    });
 
     return {
       classification_reason: learnedClassification.reason || "Matched previous manual correction memory.",
@@ -714,6 +729,10 @@ async function getLearnedClassifications(
     .limit(2000);
 
   if (!classificationMemoryError) {
+    debugClassificationMemoryTrace("query-learning-memory", {
+      matches: classificationMemory?.length || 0,
+      organizationId: userId,
+    });
     learnedClassifications.push(
       ...(((classificationMemory || []) as unknown) as Array<{
         category: string | null;
@@ -981,14 +1000,75 @@ async function persistClassificationLearningMemory({
     onConflict: "organization_id,normalized_description,system,category,subcategory",
   });
 
-  if (
-    error &&
-    !error.message.includes("classification_learning_memory") &&
-    !error.message.includes("schema cache") &&
-    !error.message.includes("PGRST")
-  ) {
+  if (!error) {
+    debugClassificationMemoryTrace("save-learning-memory", {
+      insertedOrUpdated: learningRecords.length,
+      sample: learningRecords[0]
+        ? {
+            category: learningRecords[0].category,
+            normalizedDescription: learningRecords[0].normalized_description,
+            source: learningRecords[0].source,
+            subcategory: learningRecords[0].subcategory,
+            system: learningRecords[0].system,
+          }
+        : null,
+    });
+    return;
+  }
+
+  const canInsertFallback =
+    error.message.includes("ON CONFLICT") ||
+    error.message.includes("on conflict") ||
+    error.message.includes("unique") ||
+    error.message.includes("constraint");
+
+  if (canInsertFallback) {
+    const insertResult = await supabase.from("classification_learning_memory").insert(learningRecords);
+
+    if (!insertResult.error) {
+      debugClassificationMemoryTrace("save-learning-memory-insert-fallback", {
+        inserted: learningRecords.length,
+      });
+      return;
+    }
+  }
+
+  if (!error.message.includes("classification_learning_memory") && !error.message.includes("schema cache") && !error.message.includes("PGRST")) {
     console.error(`Failed saving classification learning memory: ${error.message}`);
   }
+}
+
+async function getClassificationLearningMemoryForUser({
+  supabase,
+  userId,
+}: {
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+  userId: string;
+}) {
+  const { data, error } = await supabase
+    .from("classification_learning_memory")
+    .select("normalized_description, original_description, system, category, subcategory, confidence_score, created_from_file_id")
+    .eq("organization_id", userId)
+    .order("updated_at", { ascending: false })
+    .limit(3000);
+
+  if (error) {
+    if (!error.message.includes("classification_learning_memory") && !error.message.includes("schema cache")) {
+      console.error(`Failed reading classification learning memory for reparse: ${error.message}`);
+    }
+
+    return [];
+  }
+
+  return (((data || []) as unknown) as Array<{
+    category: string | null;
+    confidence_score: number | null;
+    created_from_file_id: string | null;
+    normalized_description: string | null;
+    original_description: string | null;
+    subcategory: string | null;
+    system: string | null;
+  }>).filter((memory) => memory.original_description || memory.normalized_description);
 }
 
 async function getPreservedManualClassificationsForProject({
@@ -1168,7 +1248,46 @@ async function getPreservedManualClassificationsForProject({
     })
     .filter((classification): classification is PreservedManualClassification => classification !== null);
 
-  return { currentManualClassifications, durableManualClassifications };
+  const classificationLearningMemory = await getClassificationLearningMemoryForUser({ supabase, userId });
+  const reusableManualClassifications = classificationLearningMemory
+    .map((row): PreservedManualClassification | null => {
+      if (
+        !row.system ||
+        !row.category ||
+        !row.subcategory ||
+        !isValidSystem(row.system) ||
+        !isValidCategory(row.system, row.category) ||
+        !isValidSubcategory(row.system, row.category, row.subcategory)
+      ) {
+        return null;
+      }
+
+      return {
+        category: row.system,
+        classificationReason: "Restored from verified classification learning memory.",
+        classificationSubcategory: row.subcategory,
+        confidenceScore: Number(row.confidence_score || 1),
+        description: row.original_description || row.normalized_description || "",
+        fileId: row.created_from_file_id || null,
+        quantity: null,
+        rowNumber: null,
+        sheetName: null,
+        subcategory: row.category,
+        unit: null,
+      } satisfies PreservedManualClassification;
+    })
+    .filter((classification): classification is PreservedManualClassification => classification !== null);
+
+  debugClassificationMemoryTrace("reparse-restore-memory", {
+    currentManualRows: currentManualClassifications.length,
+    legacyMemoryRows: durableManualClassifications.length,
+    reusableMemoryRows: reusableManualClassifications.length,
+  });
+
+  return {
+    currentManualClassifications,
+    durableManualClassifications: [...reusableManualClassifications, ...durableManualClassifications],
+  };
 }
 
 async function getAuthenticatedUser() {
