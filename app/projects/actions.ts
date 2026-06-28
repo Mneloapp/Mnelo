@@ -486,41 +486,65 @@ function resolveBoqItemClassification(
     };
   }
 
+  const classification = resolveAutomaticBoqClassification(row);
+
+  if (!classification.classification) {
+    return needsReviewPrediction({
+      reason: classification.reason,
+      systemName: classification.systemHint || classification.rulesClassification.systemName,
+    });
+  }
+
+  return {
+    classification_reason:
+      classification.classification.reason ||
+      (classification.classification === classification.rulesClassification
+        ? "Matched local classification rules."
+        : "Inherited from Excel context."),
+    classification_source: classification.classification.source || "rules",
+    needs_review: false,
+    predicted_category: classification.classification.systemName,
+    predicted_subcategory: classification.classification.categoryName,
+    predicted_classification_subcategory: classification.classification.subcategoryName || null,
+    predicted_supplier_type: classification.classification.supplierType,
+    confidence_score: classification.classification.confidenceScore,
+    user_corrected: false,
+  };
+}
+
+function resolveAutomaticBoqClassification(row: {
+  classification_subcategory?: string | null;
+  description: string;
+  section_header?: string | null;
+  sheet_name?: string | null;
+  source_sheet_name?: string | null;
+  subcategory?: string | null;
+  category?: string | null;
+}) {
   const inheritedClassification = inferClassificationFromExcelContext(row.sheet_name, row.section_header);
   const inheritedSystemHint =
     inheritedClassification?.systemName && inheritedClassification.systemName !== NEEDS_REVIEW_SYSTEM
       ? inheritedClassification.systemName
       : undefined;
-  const rulesClassification = classifyBoqSystem(row.description, inheritedSystemHint);
+  const rulesClassification = classifyBoqSystem(
+    row.description,
+    inheritedSystemHint || row.category,
+    row.subcategory,
+    row.classification_subcategory,
+  );
   const classification = isStrongClassification(rulesClassification)
     ? rulesClassification
     : isStrongClassification(inheritedClassification)
       ? inheritedClassification
       : null;
 
-  if (!classification) {
-    return needsReviewPrediction({
-      reason: inheritedSystemHint
+  return {
+    classification,
+    reason: inheritedSystemHint
         ? "System inferred from Excel context, but category and subcategory require review."
         : "Local classifier could not confidently map this item.",
-      systemName: inheritedSystemHint || rulesClassification.systemName,
-    });
-  }
-
-  const needsReview = false;
-
-  return {
-    classification_reason:
-      classification.reason ||
-      (classification === rulesClassification ? "Matched local classification rules." : "Inherited from Excel context."),
-    classification_source: classification.source || "rules",
-    needs_review: needsReview,
-    predicted_category: classification.systemName,
-    predicted_subcategory: classification.categoryName,
-    predicted_classification_subcategory: classification.subcategoryName || null,
-    predicted_supplier_type: classification.supplierType,
-    confidence_score: classification.confidenceScore,
-    user_corrected: false,
+    rulesClassification,
+    systemHint: inheritedSystemHint,
   };
 }
 
@@ -2634,11 +2658,26 @@ async function classifyProjectBoqItemsUnsafe(formData: FormData) {
       };
     }
 
-    const inheritedClassification = inferClassificationFromExcelContext(row.source_sheet_name, row.section_header);
+    const automaticClassification = resolveAutomaticBoqClassification({
+      category: row.category,
+      classification_subcategory: row.classification_subcategory,
+      description: row.description,
+      section_header: row.section_header,
+      sheet_name: row.source_sheet_name || row.sheet_name,
+      source_sheet_name: row.source_sheet_name,
+      subcategory: row.subcategory,
+    });
     const localClassification =
-      learnedClassification ||
-      inheritedClassification ||
-      classifyBoqSystem(row.description, row.category, row.subcategory, row.classification_subcategory);
+      automaticClassification.classification ||
+      ({
+        categoryName: NEEDS_REVIEW_CATEGORY,
+        confidenceScore: automaticClassification.systemHint ? 0.48 : 0.18,
+        reason: automaticClassification.reason,
+        source: automaticClassification.systemHint ? "rules" : "needs_review",
+        subcategoryName: null,
+        supplierType: "Needs review",
+        systemName: automaticClassification.systemHint || automaticClassification.rulesClassification.systemName,
+      } satisfies SystemClassification);
     const source: ClassificationSource =
       localClassification.source || (localClassification.systemName === NEEDS_REVIEW_SYSTEM ? "needs_review" : "rules");
 
