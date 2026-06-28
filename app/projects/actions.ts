@@ -988,10 +988,11 @@ async function persistClassificationLearningMemory({
     .filter((record) => record.normalized_description && record.system && record.category && record.subcategory);
 
   if (learningRecords.length === 0) {
-    return;
+    return { error: null, requested: 0, savedCount: 0 };
   }
 
   let savedCount = 0;
+  let firstError: string | null = null;
 
   for (const record of learningRecords) {
     const existing = await supabase
@@ -1002,8 +1003,9 @@ async function persistClassificationLearningMemory({
       .order("updated_at", { ascending: false })
       .limit(1);
 
-    if (existing.error && !existing.error.message.includes("schema cache")) {
-      console.error(`Failed checking classification learning memory: ${existing.error.message}`);
+    if (existing.error) {
+      firstError ||= `Failed checking classification learning memory: ${existing.error.message}`;
+      console.error(firstError);
       continue;
     }
 
@@ -1013,13 +1015,8 @@ async function persistClassificationLearningMemory({
       : await supabase.from("classification_learning_memory").insert(record);
 
     if (writeResult.error) {
-      if (
-        !writeResult.error.message.includes("classification_learning_memory") &&
-        !writeResult.error.message.includes("schema cache") &&
-        !writeResult.error.message.includes("PGRST")
-      ) {
-        console.error(`Failed saving classification learning memory: ${writeResult.error.message}`);
-      }
+      firstError ||= `Failed saving classification learning memory: ${writeResult.error.message}`;
+      console.error(firstError);
       continue;
     }
 
@@ -1036,9 +1033,19 @@ async function persistClassificationLearningMemory({
           source: learningRecords[0].source,
           subcategory: learningRecords[0].classification_subcategory,
           system: learningRecords[0].classification_system,
-        }
+      }
       : null,
   });
+
+  if (savedCount !== learningRecords.length) {
+    return {
+      error: firstError || `Saved ${savedCount} of ${learningRecords.length} classification learning memory records.`,
+      requested: learningRecords.length,
+      savedCount,
+    };
+  }
+
+  return { error: null, requested: learningRecords.length, savedCount };
 }
 
 async function getClassificationLearningMemoryForUser({
@@ -3019,7 +3026,11 @@ export async function correctBoqItemSystemClassification(formData: FormData) {
       records: learningRows,
       supabase,
     });
-    await persistClassificationLearningMemory({ records: learningRows, supabase });
+    const learningMemoryResult = await persistClassificationLearningMemory({ records: learningRows, supabase });
+
+    if (learningMemoryResult.error) {
+      return { ok: false, error: learningMemoryResult.error } satisfies ProjectDocumentActionResult;
+    }
 
     revalidatePath(`/projects/${projectId}`);
     revalidatePath(`/projects/${projectId}/intelligence`);
@@ -3231,7 +3242,11 @@ export async function bulkCorrectBoqItemClassifications(formData: FormData) {
       });
     });
     await persistManualClassificationMemory({ records: learningRows, supabase });
-    await persistClassificationLearningMemory({ records: learningRows, supabase });
+    const learningMemoryResult = await persistClassificationLearningMemory({ records: learningRows, supabase });
+
+    if (learningMemoryResult.error) {
+      return { ok: false, error: learningMemoryResult.error } satisfies ProjectDocumentActionResult;
+    }
 
     revalidatePath(`/projects/${projectId}`);
     revalidatePath(`/projects/${projectId}/intelligence`);
