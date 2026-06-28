@@ -928,6 +928,7 @@ function manualClassificationMemoryPayload({
   const normalizedDescription = normalizeFingerprintText(description);
   const strictFingerprint = boqRowStrictFingerprint({
     description,
+    fileId: sourceFileId,
     quantity,
     rowNumber,
     sheetName,
