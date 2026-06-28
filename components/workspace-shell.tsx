@@ -6,11 +6,11 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 type LegacyActive = "Dashboard" | "Projects" | "Files" | "BOQ" | "Settings";
 
 const activeMap: Record<LegacyActive, string> = {
-  BOQ: "Packages",
-  Dashboard: "Home",
-  Files: "Suppliers",
-  Projects: "Missions",
-  Settings: "Contracts",
+  BOQ: "Current Work",
+  Dashboard: "Current Work",
+  Files: "Current Work",
+  Projects: "Projects",
+  Settings: "Settings",
 };
 
 async function getUserEmail() {
