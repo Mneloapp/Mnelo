@@ -6,170 +6,10 @@
 -- are saved to boq_items, persisted to classification_learning_memory,
 -- and available for reparse/learned classification.
 
--- 1. Latest 50 classification learning memory rows.
--- Proves whether manual corrections are being written to durable learning memory.
-select
-  id,
-  organization_id,
-  user_id,
-  normalized_description,
-  original_description,
-  classification_system,
-  classification_category,
-  classification_subcategory,
-  system,
-  category,
-  subcategory,
-  source,
-  confidence,
-  confidence_score,
-  created_from_project_id,
-  created_from_file_id,
-  created_at,
-  updated_at
-from public.classification_learning_memory
-order by updated_at desc nulls last, created_at desc
-limit 50;
-
--- 2. Latest 50 BOQ item rows with classification fields.
--- Proves whether current parsed rows store user/manual classification values.
-select
-  id,
-  project_id,
-  user_id,
-  source_file_id,
-  project_file_id,
-  description,
-  quantity,
-  unit,
-  category,
-  subcategory,
-  classification_system,
-  classification_category,
-  classification_subcategory,
-  classification_source,
-  classification_confidence,
-  classification_reason,
-  classification_status,
-  user_corrected,
-  needs_review,
-  source_sheet_name,
-  source_row_number,
-  sheet_name,
-  row_number,
-  created_at,
-  updated_at
-from public.boq_items
-order by updated_at desc nulls last, created_at desc
-limit 50;
-
--- 3. BOQ rows containing Georgian exit-sign text.
--- Expected after manual save:
--- classification_system = Electrical
--- classification_category = Lighting
--- classification_subcategory = Exit Signs
--- classification_source in ('user', 'learned')
--- user_corrected = true
--- needs_review = false
-select
-  id,
-  project_id,
-  user_id,
-  source_file_id,
-  project_file_id,
-  description,
-  quantity,
-  unit,
-  classification_system,
-  classification_category,
-  classification_subcategory,
-  classification_source,
-  classification_confidence,
-  classification_reason,
-  user_corrected,
-  needs_review,
-  source_sheet_name,
-  source_row_number,
-  updated_at,
-  created_at
-from public.boq_items
-where description ilike '%გასასვლელის მაჩვენებელი%'
-order by updated_at desc nulls last, created_at desc;
-
--- 4. BOQ rows containing EXIT.
--- Proves whether the English part of the same item survives parsing/reparse.
-select
-  id,
-  project_id,
-  user_id,
-  source_file_id,
-  project_file_id,
-  description,
-  quantity,
-  unit,
-  classification_system,
-  classification_category,
-  classification_subcategory,
-  classification_source,
-  classification_confidence,
-  classification_reason,
-  user_corrected,
-  needs_review,
-  source_sheet_name,
-  source_row_number,
-  updated_at,
-  created_at
-from public.boq_items
-where description ilike '%EXIT%'
-order by updated_at desc nulls last, created_at desc;
-
--- 5. Memory rows containing Georgian exit-sign text.
--- Proves whether durable memory exists for the same normalized/original text.
--- If this returns no rows after a successful manual save, memory is not saving.
-select
-  id,
-  organization_id,
-  user_id,
-  normalized_description,
-  original_description,
-  classification_system,
-  classification_category,
-  classification_subcategory,
-  system,
-  category,
-  subcategory,
-  source,
-  confidence,
-  confidence_score,
-  created_from_project_id,
-  created_from_file_id,
-  created_at,
-  updated_at
-from public.classification_learning_memory
-where original_description ilike '%გასასვლელის%'
-   or normalized_description ilike '%გასასვლელის%'
-order by updated_at desc nulls last, created_at desc;
-
--- 6. Duplicate memory rows by organization + normalized description.
--- Proves whether multiple conflicting learned classifications exist for
--- the same normalized item text.
-select
-  organization_id,
-  normalized_description,
-  count(*) as memory_rows,
-  array_agg(distinct classification_system) as classification_systems,
-  array_agg(distinct classification_category) as classification_categories,
-  array_agg(distinct classification_subcategory) as classification_subcategories,
-  array_agg(distinct source) as sources,
-  min(created_at) as first_created_at,
-  max(updated_at) as latest_updated_at
-from public.classification_learning_memory
-group by organization_id, normalized_description
-having count(*) > 1
-order by memory_rows desc, latest_updated_at desc nulls last;
-
--- 7. Schema check for classification-related columns.
--- Proves whether production has the columns the app reads/writes.
+-- 1. Schema check for classification-related columns.
+-- Run this first. It proves which columns exist in production before reading data.
+-- The rest of this script intentionally avoids optional legacy columns that may
+-- be missing in live Supabase, such as boq_items.project_file_id.
 select
   table_name,
   column_name,
@@ -202,10 +42,170 @@ where table_schema = 'public'
     'needs_review',
     'created_from_project_id',
     'created_from_file_id',
-    'source_file_id',
-    'project_file_id'
+    'source_file_id'
   )
 order by table_name, column_name;
+
+-- 2. Latest 50 classification learning memory rows.
+-- Proves whether manual corrections are being written to durable learning memory.
+select
+  id,
+  organization_id,
+  user_id,
+  normalized_description,
+  original_description,
+  classification_system,
+  classification_category,
+  classification_subcategory,
+  system,
+  category,
+  subcategory,
+  source,
+  confidence,
+  confidence_score,
+  created_from_project_id,
+  created_from_file_id,
+  created_at,
+  updated_at
+from public.classification_learning_memory
+order by updated_at desc nulls last, created_at desc
+limit 50;
+
+-- 3. Latest 50 BOQ item rows with classification fields.
+-- Proves whether current parsed rows store user/manual classification values.
+-- Uses source_file_id only; project_file_id is optional in older/local migrations
+-- and is not present in the current live schema that raised the error.
+select
+  id,
+  project_id,
+  user_id,
+  source_file_id,
+  description,
+  quantity,
+  unit,
+  category,
+  subcategory,
+  classification_system,
+  classification_category,
+  classification_subcategory,
+  classification_source,
+  classification_confidence,
+  classification_reason,
+  classification_status,
+  user_corrected,
+  needs_review,
+  source_sheet_name,
+  source_row_number,
+  sheet_name,
+  row_number,
+  created_at,
+  updated_at
+from public.boq_items
+order by updated_at desc nulls last, created_at desc
+limit 50;
+
+-- 4. BOQ rows containing Georgian exit-sign text.
+-- Expected after manual save:
+-- classification_system = Electrical
+-- classification_category = Lighting
+-- classification_subcategory = Exit Signs
+-- classification_source in ('user', 'learned')
+-- user_corrected = true
+-- needs_review = false
+select
+  id,
+  project_id,
+  user_id,
+  source_file_id,
+  description,
+  quantity,
+  unit,
+  classification_system,
+  classification_category,
+  classification_subcategory,
+  classification_source,
+  classification_confidence,
+  classification_reason,
+  user_corrected,
+  needs_review,
+  source_sheet_name,
+  source_row_number,
+  updated_at,
+  created_at
+from public.boq_items
+where description ilike '%გასასვლელის მაჩვენებელი%'
+order by updated_at desc nulls last, created_at desc;
+
+-- 5. BOQ rows containing EXIT.
+-- Proves whether the English part of the same item survives parsing/reparse.
+select
+  id,
+  project_id,
+  user_id,
+  source_file_id,
+  description,
+  quantity,
+  unit,
+  classification_system,
+  classification_category,
+  classification_subcategory,
+  classification_source,
+  classification_confidence,
+  classification_reason,
+  user_corrected,
+  needs_review,
+  source_sheet_name,
+  source_row_number,
+  updated_at,
+  created_at
+from public.boq_items
+where description ilike '%EXIT%'
+order by updated_at desc nulls last, created_at desc;
+
+-- 6. Memory rows containing Georgian exit-sign text.
+-- Proves whether durable memory exists for the same normalized/original text.
+-- If this returns no rows after a successful manual save, memory is not saving.
+select
+  id,
+  organization_id,
+  user_id,
+  normalized_description,
+  original_description,
+  classification_system,
+  classification_category,
+  classification_subcategory,
+  system,
+  category,
+  subcategory,
+  source,
+  confidence,
+  confidence_score,
+  created_from_project_id,
+  created_from_file_id,
+  created_at,
+  updated_at
+from public.classification_learning_memory
+where original_description ilike '%გასასვლელის%'
+   or normalized_description ilike '%გასასვლელის%'
+order by updated_at desc nulls last, created_at desc;
+
+-- 7. Duplicate memory rows by organization + normalized description.
+-- Proves whether multiple conflicting learned classifications exist for
+-- the same normalized item text.
+select
+  organization_id,
+  normalized_description,
+  count(*) as memory_rows,
+  array_agg(distinct classification_system) as classification_systems,
+  array_agg(distinct classification_category) as classification_categories,
+  array_agg(distinct classification_subcategory) as classification_subcategories,
+  array_agg(distinct source) as sources,
+  min(created_at) as first_created_at,
+  max(updated_at) as latest_updated_at
+from public.classification_learning_memory
+group by organization_id, normalized_description
+having count(*) > 1
+order by memory_rows desc, latest_updated_at desc nulls last;
 
 -- 8. RLS status and policies for the two relevant tables.
 -- Proves whether row-level security is enabled and which policies control
