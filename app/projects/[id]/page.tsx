@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Activity, BookOpen, FileText, FolderOpen, Sparkles } from "lucide-react";
+import { Activity, BookOpen, FileText, FolderOpen, Layers3, Sparkles } from "lucide-react";
 import {
   MissionCard,
   MissionProgress,
@@ -155,6 +155,7 @@ export default async function ProjectDetailsPage({ params }: { params: Promise<{
               <h2 className="text-base font-semibold text-[#0F172A]">Mission areas</h2>
               <div className="mt-5 grid gap-3 sm:grid-cols-2">
                 {[
+                  { description: "See BOQ evidence as business requirements.", href: "requirements", icon: Layers3, label: "Requirements" },
                   { description: "Upload and parse tender files.", href: "documents", icon: FileText, label: "Documents" },
                   { description: "Review extracted rows and cleanup.", href: "boq", icon: FolderOpen, label: "BOQ Review" },
                   { description: "Confirm systems and categories.", href: "intelligence", icon: Sparkles, label: "Intelligence" },

@@ -5,12 +5,13 @@ import { usePathname } from "next/navigation";
 
 const workspaceRoutes = [
   { label: "Overview", segment: "" },
-  { label: "Documents", segment: "documents" },
-  { label: "BOQ Review", segment: "boq" },
-  { label: "Intelligence", segment: "intelligence" },
+  { label: "Requirements", segment: "requirements" },
+  { disabled: true, label: "Packages", segment: "packages" },
+  { disabled: true, label: "RFQs", segment: "rfqs" },
+  { disabled: true, label: "Quotes", segment: "quotes" },
+  { disabled: true, label: "Procurement", segment: "procurement" },
   { label: "Knowledge", segment: "knowledge" },
   { label: "Activity", segment: "activity" },
-  { label: "Settings", segment: "settings" },
 ];
 
 export function ProjectWorkspaceNav({ projectId }: { projectId: string }) {
@@ -22,6 +23,18 @@ export function ProjectWorkspaceNav({ projectId }: { projectId: string }) {
       {workspaceRoutes.map((route) => {
         const href = route.segment ? `${basePath}/${route.segment}` : basePath;
         const isActive = pathname === href;
+
+        if (route.disabled) {
+          return (
+            <span
+              className="cursor-not-allowed rounded-xl px-4 py-2 text-sm font-semibold text-slate-300"
+              key={route.label}
+              title="Coming soon"
+            >
+              {route.label}
+            </span>
+          );
+        }
 
         return (
           <Link
