@@ -1,3 +1,5 @@
+import { normalizeClassificationMemoryDescription } from "./normalize";
+
 export type ClassificationMemoryRecord = {
   category: string | null;
   confidenceScore?: number | null;
@@ -17,14 +19,6 @@ export type ClassificationMemoryMatch = {
   subcategory: string;
   system: string;
 };
-
-export function normalizeClassificationMemoryDescription(value?: string | number | null) {
-  return String(value ?? "")
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s]/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
 
 function isCompleteMemoryRecord(record: ClassificationMemoryRecord): record is ClassificationMemoryRecord & {
   category: string;
