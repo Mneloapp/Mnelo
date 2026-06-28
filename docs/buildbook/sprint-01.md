@@ -88,3 +88,5 @@ Requirement Engine architecture was introduced as the bridge between BOQ underst
 MES-006 introduced Requirement as Mnelo’s core domain object and defined the Requirement lifecycle, source traceability, versioning and relationship to RFQ, quotes, tender BOQ writeback and procurement.
 
 MES-007 defined the Requirement Workflow Engine and formalized the Tender-to-Procurement lifecycle around stable Requirement identity.
+
+MES-009 introduced Requirement Views Architecture and established one Requirement with multiple business perspectives.
