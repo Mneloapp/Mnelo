@@ -96,5 +96,3 @@ MES-010 introduced Procurement Package Architecture and established Packages as 
 Design Order #001 introduced a UI prototype for Requirement Workspace using existing BOQ data as source evidence.
 
 Manual classification UX was improved and Apply to Similar Items was made review-first and conservative.
-
-Design Order #002 introduced a prototype-only AI Decision Review workflow for manual classification.
