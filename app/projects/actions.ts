@@ -134,12 +134,16 @@ type ManualClassificationRestoreSet = {
 };
 
 type LearnedClassification = {
+  category?: string | null;
+  confidence?: string | null;
+  confidence_score?: number | null;
   final_classification_subcategory?: string | null;
   item_description: string | null;
   final_category?: string | null;
   final_subcategory?: string | null;
   final_system?: string | null;
   normalized_description?: string | null;
+  original_description?: string | null;
   output?: {
     category?: string | null;
     subcategory?: string | null;
@@ -149,6 +153,9 @@ type LearnedClassification = {
   source_file_id?: string | null;
   source_row_number?: number | null;
   source_sheet_name?: string | null;
+  source?: string | null;
+  subcategory?: string | null;
+  system?: string | null;
   unit?: string | null;
   user_corrected_category: string | null;
   user_corrected_subcategory: string | null;
@@ -567,45 +574,79 @@ function tokenSimilarity(left: string, right: string) {
   return 0;
 }
 
+function getLearnedClassificationFields(learnedClassification: LearnedClassification) {
+  const systemName =
+    learnedClassification.system ||
+    learnedClassification.final_system ||
+    learnedClassification.user_corrected_category ||
+    learnedClassification.output?.system ||
+    learnedClassification.final_category ||
+    null;
+  const categoryName =
+    learnedClassification.category ||
+    (learnedClassification.final_system
+      ? learnedClassification.final_category || learnedClassification.user_corrected_subcategory || learnedClassification.output?.category
+      : learnedClassification.user_corrected_subcategory || learnedClassification.output?.category || learnedClassification.final_subcategory) ||
+    null;
+  const subcategoryName =
+    learnedClassification.subcategory ||
+    learnedClassification.final_classification_subcategory ||
+    (learnedClassification.final_system ? learnedClassification.final_subcategory : null) ||
+    learnedClassification.output?.subcategory ||
+    null;
+
+  if (
+    !systemName ||
+    !categoryName ||
+    !subcategoryName ||
+    !isValidSystem(systemName) ||
+    !isValidCategory(systemName, categoryName) ||
+    !isValidSubcategory(systemName, categoryName, subcategoryName)
+  ) {
+    return null;
+  }
+
+  return {
+    categoryName,
+    subcategoryName,
+    systemName,
+  };
+}
+
 function findLearnedClassification(description: string, learnedClassifications: LearnedClassification[]) {
   const tokens = Array.from(descriptionTokens(description));
-  const normalizedDescription = description.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim();
+  const normalizedDescription = normalizeFingerprintText(description);
   let bestMatch: {
     categoryName: string;
     matchedTokens: number;
     score: number;
-    subcategoryName: string | null;
+    subcategoryName: string;
     systemName: string;
   } | null = null;
 
   for (const learnedClassification of learnedClassifications) {
-    const learnedDescription = learnedClassification.item_description;
-    const systemName =
-      learnedClassification.final_system ||
-      learnedClassification.user_corrected_category ||
-      learnedClassification.output?.system ||
-      learnedClassification.final_category;
-    const categoryName =
-      learnedClassification.final_system
-        ? learnedClassification.final_category || learnedClassification.user_corrected_subcategory || learnedClassification.output?.category
-        : learnedClassification.user_corrected_subcategory || learnedClassification.output?.category || learnedClassification.final_subcategory;
-    const subcategoryName =
-      learnedClassification.final_classification_subcategory ||
-      (learnedClassification.final_system ? learnedClassification.final_subcategory : null) ||
-      learnedClassification.output?.subcategory ||
-      null;
+    const learnedDescription = learnedClassification.item_description || learnedClassification.original_description;
+    const fields = getLearnedClassificationFields(learnedClassification);
 
-    if (!learnedDescription || !systemName || !categoryName || !isValidSystem(systemName) || !isValidCategory(systemName, categoryName)) {
+    if (!learnedDescription || !fields) {
       continue;
     }
 
-    const validSubcategory = isValidSubcategory(systemName, categoryName, subcategoryName) ? subcategoryName : null;
     const learnedTokens = Array.from(descriptionTokens(learnedDescription));
-    const normalizedLearnedDescription = learnedDescription
-      .toLowerCase()
-      .replace(/[^\p{L}\p{N}\s]/gu, " ")
-      .replace(/\s+/g, " ")
-      .trim();
+    const normalizedLearnedDescription = learnedClassification.normalized_description || normalizeFingerprintText(learnedDescription);
+
+    if (normalizedDescription.length >= 3 && normalizedDescription === normalizedLearnedDescription) {
+      return {
+        categoryName: fields.categoryName,
+        confidenceScore: 1,
+        reason: "Matched verified classification learning memory.",
+        source: "learned" as const,
+        subcategoryName: fields.subcategoryName,
+        supplierType: "Learned supplier",
+        systemName: fields.systemName,
+      } satisfies SystemClassification;
+    }
+
     const directHits = tokens.filter((token) => learnedTokens.includes(token)).length;
     const fuzzyHits = tokens.reduce((total, token) => {
       const bestTokenScore = learnedTokens.reduce((best, learnedToken) => Math.max(best, tokenSimilarity(token, learnedToken)), 0);
@@ -624,16 +665,28 @@ function findLearnedClassification(description: string, learnedClassifications: 
       normalizedLearnedDescription.length >= 8 &&
       (normalizedDescription.includes(normalizedLearnedDescription) || normalizedLearnedDescription.includes(normalizedDescription))
     ) {
-      bestMatch = { categoryName, matchedTokens: tokens.length, score: 1, subcategoryName: validSubcategory, systemName };
+      bestMatch = {
+        categoryName: fields.categoryName,
+        matchedTokens: tokens.length,
+        score: 0.95,
+        subcategoryName: fields.subcategoryName,
+        systemName: fields.systemName,
+      };
       continue;
     }
 
     if (!bestMatch || score > bestMatch.score) {
-      bestMatch = { categoryName, matchedTokens, score, subcategoryName: validSubcategory, systemName };
+      bestMatch = {
+        categoryName: fields.categoryName,
+        matchedTokens,
+        score,
+        subcategoryName: fields.subcategoryName,
+        systemName: fields.systemName,
+      };
     }
   }
 
-  if (!bestMatch || bestMatch.score < 0.58 || bestMatch.matchedTokens < Math.min(2, tokens.length)) {
+  if (!bestMatch || bestMatch.score < 0.72 || bestMatch.matchedTokens < Math.min(2, tokens.length)) {
     return null;
   }
 
@@ -652,6 +705,50 @@ async function getLearnedClassifications(
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
   userId: string,
 ) {
+  const learnedClassifications: LearnedClassification[] = [];
+  const { data: classificationMemory, error: classificationMemoryError } = await supabase
+    .from("classification_learning_memory")
+    .select("normalized_description, original_description, system, category, subcategory, source, confidence, confidence_score")
+    .eq("organization_id", userId)
+    .order("updated_at", { ascending: false })
+    .limit(2000);
+
+  if (!classificationMemoryError) {
+    learnedClassifications.push(
+      ...(((classificationMemory || []) as unknown) as Array<{
+        category: string | null;
+        confidence: string | null;
+        confidence_score: number | null;
+        normalized_description: string | null;
+        original_description: string | null;
+        source: string | null;
+        subcategory: string | null;
+        system: string | null;
+      }>).map((memory) => ({
+        category: memory.category,
+        confidence: memory.confidence,
+        confidence_score: memory.confidence_score,
+        final_category: memory.category,
+        final_classification_subcategory: memory.subcategory,
+        final_subcategory: memory.subcategory,
+        final_system: memory.system,
+        item_description: memory.original_description || memory.normalized_description,
+        normalized_description: memory.normalized_description,
+        original_description: memory.original_description,
+        source: memory.source,
+        subcategory: memory.subcategory,
+        system: memory.system,
+        user_corrected_category: memory.system,
+        user_corrected_subcategory: memory.category,
+      })),
+    );
+  } else if (
+    !classificationMemoryError.message.includes("classification_learning_memory") &&
+    !classificationMemoryError.message.includes("schema cache")
+  ) {
+    console.error(`Failed reading classification learning memory: ${classificationMemoryError.message}`);
+  }
+
   const selectAttempts = [
     "item_description, normalized_description, final_system, final_category, final_subcategory, final_classification_subcategory, user_corrected_category, user_corrected_subcategory, quantity, unit, source_sheet_name, source_row_number, output",
     "item_description, final_system, final_category, final_subcategory, final_classification_subcategory, user_corrected_category, user_corrected_subcategory, output",
@@ -671,7 +768,8 @@ async function getLearnedClassifications(
       .limit(1000);
 
     if (!error) {
-      return ((data || []) as unknown) as LearnedClassification[];
+      learnedClassifications.push(...(((data || []) as unknown) as LearnedClassification[]));
+      return learnedClassifications;
     }
 
     if (
@@ -685,11 +783,11 @@ async function getLearnedClassifications(
       !error.message.includes("schema cache")
     ) {
       console.error(`Failed reading learned classifications: ${error.message}`);
-      return [];
+      return learnedClassifications;
     }
   }
 
-  return [];
+  return learnedClassifications;
 }
 
 function isManualBoqClassification(row: BoqClassificationRow) {
@@ -846,6 +944,53 @@ async function persistManualClassificationMemory({
   }
 }
 
+function classificationLearningMemoryPayload(record: ReturnType<typeof manualClassificationMemoryPayload>) {
+  return {
+    category: record.final_category,
+    confidence: "verified",
+    confidence_score: 1,
+    created_from_file_id: record.source_file_id,
+    created_from_project_id: record.project_id,
+    normalized_description: record.normalized_description,
+    organization_id: record.user_id,
+    original_description: record.item_description,
+    source: "user",
+    subcategory: record.final_classification_subcategory || record.final_subcategory,
+    system: record.final_system,
+    updated_at: new Date().toISOString(),
+    user_id: record.user_id,
+  };
+}
+
+async function persistClassificationLearningMemory({
+  records,
+  supabase,
+}: {
+  records: Array<ReturnType<typeof manualClassificationMemoryPayload>>;
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+}) {
+  const learningRecords = records
+    .map(classificationLearningMemoryPayload)
+    .filter((record) => record.normalized_description && record.system && record.category && record.subcategory);
+
+  if (learningRecords.length === 0) {
+    return;
+  }
+
+  const { error } = await supabase.from("classification_learning_memory").upsert(learningRecords, {
+    onConflict: "organization_id,normalized_description,system,category,subcategory",
+  });
+
+  if (
+    error &&
+    !error.message.includes("classification_learning_memory") &&
+    !error.message.includes("schema cache") &&
+    !error.message.includes("PGRST")
+  ) {
+    console.error(`Failed saving classification learning memory: ${error.message}`);
+  }
+}
+
 async function getPreservedManualClassificationsForProject({
   projectFileId,
   projectId,
@@ -927,24 +1072,30 @@ async function getPreservedManualClassificationsForProject({
       unit: row.unit || null,
     })) satisfies PreservedManualClassification[];
 
+  const currentManualMemoryRecords = currentManualClassifications.map((classification) =>
+    manualClassificationMemoryPayload({
+      category: classification.category,
+      classificationSubcategory: classification.classificationSubcategory,
+      confidenceScore: classification.confidenceScore,
+      description: classification.description,
+      sourceFileId: classification.fileId || projectFileId || null,
+      projectId,
+      quantity: classification.quantity,
+      reason: classification.classificationReason || "Backfilled manual correction before reparse.",
+      rowNumber: classification.rowNumber,
+      sheetName: classification.sheetName,
+      subcategory: classification.subcategory,
+      unit: classification.unit,
+      userId,
+    }),
+  );
+
   await persistManualClassificationMemory({
-    records: currentManualClassifications.map((classification) =>
-      manualClassificationMemoryPayload({
-        category: classification.category,
-        classificationSubcategory: classification.classificationSubcategory,
-        confidenceScore: classification.confidenceScore,
-        description: classification.description,
-        sourceFileId: classification.fileId || projectFileId || null,
-        projectId,
-        quantity: classification.quantity,
-        reason: classification.classificationReason || "Backfilled manual correction before reparse.",
-        rowNumber: classification.rowNumber,
-        sheetName: classification.sheetName,
-        subcategory: classification.subcategory,
-        unit: classification.unit,
-        userId,
-      }),
-    ),
+    records: currentManualMemoryRecords,
+    supabase,
+  });
+  await persistClassificationLearningMemory({
+    records: currentManualMemoryRecords,
     supabase,
   });
 
@@ -2567,27 +2718,30 @@ export async function correctBoqItemSystemClassification(formData: FormData) {
       return { ok: false, error: updateError } satisfies ProjectDocumentActionResult;
     }
 
+    const learningRows = [
+      manualClassificationMemoryPayload({
+        category: systemName,
+        classificationSubcategory: subcategoryName,
+        confidenceScore: previousClassification.confidenceScore,
+        description: (row as BoqClassificationRow).description,
+        projectId,
+        quantity: (row as BoqClassificationRow).quantity,
+        reason: "User system classification correction",
+        rowId: itemId,
+        rowNumber: (row as BoqClassificationRow).source_row_number || (row as BoqClassificationRow).row_number || null,
+        sheetName: (row as BoqClassificationRow).source_sheet_name || (row as BoqClassificationRow).sheet_name || null,
+        sourceFileId: (row as BoqClassificationRow).source_file_id || (row as BoqClassificationRow).project_file_id || null,
+        subcategory: categoryName,
+        unit: (row as BoqClassificationRow).unit,
+        userId: user.id,
+      }),
+    ];
+
     await persistManualClassificationMemory({
-      records: [
-        manualClassificationMemoryPayload({
-          category: systemName,
-          classificationSubcategory: subcategoryName,
-          confidenceScore: previousClassification.confidenceScore,
-          description: (row as BoqClassificationRow).description,
-          projectId,
-          quantity: (row as BoqClassificationRow).quantity,
-          reason: "User system classification correction",
-          rowId: itemId,
-          rowNumber: (row as BoqClassificationRow).source_row_number || (row as BoqClassificationRow).row_number || null,
-          sheetName: (row as BoqClassificationRow).source_sheet_name || (row as BoqClassificationRow).sheet_name || null,
-          sourceFileId: (row as BoqClassificationRow).source_file_id || (row as BoqClassificationRow).project_file_id || null,
-          subcategory: categoryName,
-          unit: (row as BoqClassificationRow).unit,
-          userId: user.id,
-        }),
-      ],
+      records: learningRows,
       supabase,
     });
+    await persistClassificationLearningMemory({ records: learningRows, supabase });
 
     revalidatePath(`/projects/${projectId}`);
     revalidatePath(`/projects/${projectId}/intelligence`);
@@ -2799,6 +2953,7 @@ export async function bulkCorrectBoqItemClassifications(formData: FormData) {
       });
     });
     await persistManualClassificationMemory({ records: learningRows, supabase });
+    await persistClassificationLearningMemory({ records: learningRows, supabase });
 
     revalidatePath(`/projects/${projectId}`);
     revalidatePath(`/projects/${projectId}/intelligence`);

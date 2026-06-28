@@ -78,3 +78,5 @@ Added durable manual classification memory outside parsed BOQ rows so user corre
 Manual classification corrections are persistent and must survive re-parse. User-confirmed rows use `classification_source = user` and `user_corrected = true`.
 
 Re-parse restore now matches manual corrections by file, sheet, normalized description, unit and quantity instead of row IDs.
+
+Manual corrections now also create reusable classification learning memory, so verified system/category/subcategory decisions can be reused across future projects before rules or AI run.

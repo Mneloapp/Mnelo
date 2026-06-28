@@ -14,9 +14,27 @@ Because row IDs can change, manual corrections must not depend only on `boq_item
 
 ## Storage
 
-Manual classification memory is stored in `ai_training_data`.
+Manual classification memory is stored in two compatible layers:
+
+1. `classification_learning_memory` is the durable cross-project learning memory used for future classification matches.
+2. `ai_training_data` remains populated for audit compatibility and older reparse restore paths.
 
 Canonical fields:
+
+| Field | Meaning |
+| --- | --- |
+| `organization_id` | Learning scope. Until organization accounts are formalized, Mnelo uses the authenticated user ID as the organization scope. |
+| `normalized_description` | Normalized text used for exact and safe similar matching. |
+| `original_description` | Original BOQ item description. |
+| `system` | User-confirmed system. |
+| `category` | User-confirmed category. |
+| `subcategory` | User-confirmed subcategory. |
+| `source` | Source of the memory record, usually `user`. |
+| `confidence` | Verification level, usually `verified` for manual corrections. |
+| `created_from_project_id` | Project where the correction was made. |
+| `created_from_file_id` | Uploaded file where the correction was made, when available. |
+
+Compatibility fields in `ai_training_data`:
 
 | Field | Meaning |
 | --- | --- |
@@ -49,7 +67,7 @@ Matching order:
 5. Durable manual memory normalized description when it is unique for the file.
 6. Durable manual memory normalized description only when it is globally unique.
 7. Current parsed row manual correction using the same matching order.
-8. Learned correction.
+8. Learned correction from `classification_learning_memory` or compatible `ai_training_data`.
 9. Rules classifier.
 10. Weak Excel context as a system hint.
 11. Needs Review.
@@ -69,3 +87,9 @@ If a match is found, Mnelo applies:
 User corrections always override rules, inherited Excel context and AI.
 
 Rules and AI may only classify rows that do not already have a manual or learned correction.
+
+## Cross-Project Learning
+
+When a user manually saves a BOQ classification, Mnelo writes the correction to the current `boq_items` row and also upserts a `classification_learning_memory` record. Future projects use normalized description matching to apply verified user knowledge before rules or AI.
+
+Exact normalized description matches are applied first. Similar matches must have strong token coverage and a valid system, category and subcategory before Mnelo treats them as learned classifications.
