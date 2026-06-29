@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   AlertCircle,
@@ -20,6 +21,7 @@ import {
 } from "@/lib/classification";
 import { getSimilarItemMatch, type SimilarItemMatch } from "@/lib/classification/similar-items";
 import type { ProjectSystemCategory, ProjectSystemSummary, SystemBoqItem } from "@/lib/data";
+import { MneloLogo } from "@/components/MneloLogo";
 import { EmptyState, ErrorMessage } from "@/components/ui";
 
 const systemOptions = getSystemRuleOptions();
@@ -974,13 +976,20 @@ export function ProjectSystemsPanel({
   }, [filteredRows, focusedRow]);
 
   return (
-    <section className="flex h-full min-h-0 flex-col overflow-hidden bg-[#f8fafc] p-4">
-      <header className="flex shrink-0 flex-col gap-4 rounded-[20px] border border-[#e5e7eb] bg-white px-5 py-4 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h2 className="text-2xl font-semibold tracking-tight text-[#07130f]">Classification Review - Optimized</h2>
-          <p className="mt-1 text-sm text-slate-500">Fast review. Grouped by category. Review only what matters.</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-5 text-sm">
+    <section className="flex h-full min-h-0 flex-col overflow-hidden bg-[#f8fafc]">
+      <header className="grid h-[74px] shrink-0 grid-cols-[168px_minmax(0,1fr)] border-b border-[#e5e7eb] bg-white">
+        <Link
+          className="flex h-full items-center gap-3 bg-[#0f172a] px-6 text-white transition hover:bg-[#111c32]"
+          href="/"
+        >
+          <MneloLogo className="[&_svg]:h-8 [&_svg]:w-8 [&_span]:text-2xl [&_span]:text-white" />
+        </Link>
+        <div className="flex min-w-0 items-center justify-between gap-4 px-6">
+          <div className="min-w-0">
+            <h2 className="truncate text-2xl font-semibold tracking-tight text-[#07130f]">Classification Review - Optimized (Layout 2)</h2>
+            <p className="mt-1 truncate text-sm text-slate-500">Fast review. Grouped by category. Review only what matters.</p>
+          </div>
+          <div className="flex shrink-0 items-center gap-5 text-sm">
           <KeyboardShortcutsHint />
           <div className="min-w-36">
             <div className="flex items-center justify-between gap-3">
@@ -999,6 +1008,7 @@ export function ProjectSystemsPanel({
           >
             Pause review
           </button>
+          </div>
         </div>
       </header>
 
@@ -1017,8 +1027,8 @@ export function ProjectSystemsPanel({
         </div>
       ) : null}
 
-      <div className="mt-4 grid min-h-0 flex-1 gap-2 overflow-hidden xl:grid-cols-[250px_minmax(0,1fr)_360px]">
-        <aside className="grid min-h-0 content-start gap-4 overflow-y-auto rounded-[22px] border border-[#e5e7eb] bg-white p-4">
+      <div className="grid min-h-0 flex-1 gap-2 overflow-hidden p-2 xl:grid-cols-[254px_minmax(0,1fr)_360px]">
+        <aside className="grid min-h-0 content-start gap-4 overflow-y-auto rounded-[18px] border border-[#e5e7eb] bg-white p-4">
           <div className="rounded-[18px] bg-white p-2">
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#64748b]">Project</p>
             <h3 className="mt-2 text-lg font-semibold text-[#0f172a]">{projectName}</h3>
@@ -1113,7 +1123,7 @@ export function ProjectSystemsPanel({
           </div>
         </aside>
 
-        <main className="flex min-h-0 flex-col overflow-hidden rounded-[22px] border border-[#e5e7eb] bg-white p-4">
+        <main className="flex min-h-0 flex-col overflow-hidden rounded-[18px] border border-[#e5e7eb] bg-white p-4">
           <div className="shrink-0 flex flex-col gap-4 border-b border-[#e5e7eb] pb-4 md:flex-row md:items-center md:justify-between">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#64748b]">Reviewing</p>

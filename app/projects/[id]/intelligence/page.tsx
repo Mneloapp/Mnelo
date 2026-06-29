@@ -1,7 +1,4 @@
-import {
-  ProjectUnavailableState,
-  ProjectWorkspacePage,
-} from "@/components/project-workspace";
+import { ProjectUnavailableState } from "@/components/project-workspace";
 import { ProjectSystemsPanel } from "@/components/project-systems-panel";
 import { WorkspaceShell } from "@/components/workspace-shell";
 import { getProjectFilesForCurrentUser, getProjectForCurrentUser, getProjectSystemsForCurrentUser } from "@/lib/data";
@@ -28,20 +25,18 @@ export default async function ProjectIntelligencePage({ params }: { params: Prom
   }
 
   return (
-    <WorkspaceShell active="Projects">
-      <ProjectWorkspacePage>
-        <ProjectSystemsPanel
-          fileName={filesResult.files[0]?.fileName || "Parsed BOQ"}
-          projectId={project.id}
-          projectName={project.name}
-          systems={systems}
-        />
-        {showSystemsError ? (
-          <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 font-mono text-xs text-red-800">
-            {systemsErrorMessage}
-          </p>
-        ) : null}
-      </ProjectWorkspacePage>
-    </WorkspaceShell>
+    <main className="h-screen overflow-hidden bg-[#f8fafc] text-[#0f172a]">
+      <ProjectSystemsPanel
+        fileName={filesResult.files[0]?.fileName || "Parsed BOQ"}
+        projectId={project.id}
+        projectName={project.name}
+        systems={systems}
+      />
+      {showSystemsError ? (
+        <p className="fixed bottom-4 left-4 z-50 rounded-lg border border-red-200 bg-red-50 px-3 py-2 font-mono text-xs text-red-800">
+          {systemsErrorMessage}
+        </p>
+      ) : null}
+    </main>
   );
 }
