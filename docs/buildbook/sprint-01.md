@@ -98,3 +98,5 @@ Design Order #001 introduced a UI prototype for Requirement Workspace using exis
 Manual classification UX was improved and Apply to Similar Items was made review-first and conservative.
 
 Design Order #002B replaced the rejected AI Review prototype with a cleaner Product Group Manual Review prototype.
+
+Manual Review layout was redesigned into a three-column fast review workspace based on grouped category review.

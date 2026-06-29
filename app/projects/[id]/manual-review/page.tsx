@@ -1,20 +1,20 @@
-import {
-  ProjectUnavailableState,
-  ProjectWorkspaceHeader,
-  ProjectWorkspacePage,
-  ProjectWorkspacePanel,
-} from "@/components/project-workspace";
-import { ManualReviewPrototype } from "@/components/manual-review/manual-review-prototype";
+import { ProjectUnavailableState, ProjectWorkspacePage } from "@/components/project-workspace";
+import { ProjectSystemsPanel } from "@/components/project-systems-panel";
 import { WorkspaceShell } from "@/components/workspace-shell";
-import { getBoqItemsForCurrentUser, getProjectForCurrentUser } from "@/lib/data";
+import { getProjectFilesForCurrentUser, getProjectForCurrentUser, getProjectSystemsForCurrentUser } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
 
 export default async function ProjectManualReviewPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [projectResult, boqResult] = await Promise.all([getProjectForCurrentUser(id), getBoqItemsForCurrentUser(id)]);
+  const [projectResult, systemsResult, filesResult] = await Promise.all([
+    getProjectForCurrentUser(id),
+    getProjectSystemsForCurrentUser(id),
+    getProjectFilesForCurrentUser(id),
+  ]);
   const { project, errorMessage } = projectResult;
-  const { errorMessage: boqErrorMessage, items } = boqResult;
+  const { systems, errorMessage: systemsErrorMessage } = systemsResult;
+  const showSystemsError = process.env.NODE_ENV === "development" && systemsErrorMessage;
 
   if (!project) {
     return (
@@ -24,25 +24,20 @@ export default async function ProjectManualReviewPage({ params }: { params: Prom
     );
   }
 
-  const showBoqError = process.env.NODE_ENV === "development" && boqErrorMessage;
-
   return (
     <WorkspaceShell active="Projects">
       <ProjectWorkspacePage>
-        <ProjectWorkspaceHeader project={project} />
-
-        <ProjectWorkspacePanel
-          description="Review product groups derived from BOQ rows before moving classifications into procurement workflows."
-          eyebrow="Prototype"
-          title="Manual Review"
-        >
-          <ManualReviewPrototype items={items} />
-          {showBoqError ? (
-            <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 font-mono text-xs text-red-800">
-              {boqErrorMessage}
-            </p>
-          ) : null}
-        </ProjectWorkspacePanel>
+        <ProjectSystemsPanel
+          fileName={filesResult.files[0]?.fileName || "Parsed BOQ"}
+          projectId={project.id}
+          projectName={project.name}
+          systems={systems}
+        />
+        {showSystemsError ? (
+          <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 font-mono text-xs text-red-800">
+            {systemsErrorMessage}
+          </p>
+        ) : null}
       </ProjectWorkspacePage>
     </WorkspaceShell>
   );
