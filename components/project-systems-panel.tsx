@@ -45,6 +45,14 @@ type SimilarCandidate = FlatSystemRow & {
 
 type SavedState = "idle" | "saving" | "saved";
 
+type ReviewGroup = {
+  key: string;
+  name: string;
+  needsReviewCount: number;
+  rows: FlatSystemRow[];
+  totalCount: number;
+};
+
 function defaultSubcategoryForDraft(systemName: string, categoryName: string) {
   if (categoryName === NEEDS_REVIEW_CATEGORY || systemName === NEEDS_REVIEW_SYSTEM) {
     return null;
@@ -94,6 +102,20 @@ function displaySubcategory(item: SystemBoqItem) {
   }
 
   return item.inheritedSubcategory || item.subcategory || item.sectionHeader || item.category || "Unclassified";
+}
+
+function groupNameForRow(row: FlatSystemRow) {
+  const subcategory = displaySubcategory(row.item);
+
+  if (subcategory && subcategory !== "Unclassified" && subcategory !== "Needs review") {
+    return subcategory;
+  }
+
+  if (row.category.name && row.category.name !== NEEDS_REVIEW_CATEGORY) {
+    return row.category.name;
+  }
+
+  return "Others";
 }
 
 function hasCompleteDraftClassification(draft: Pick<DraftChange, "categoryName" | "subcategoryName" | "systemName">) {
@@ -301,6 +323,15 @@ export function KeyboardShortcutsHint() {
   );
 }
 
+function SummaryLine({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="text-[#64748b]">{label}</span>
+      <span className="font-semibold text-[#0f172a]">{value}</span>
+    </div>
+  );
+}
+
 export function ClassificationEditorPanel({
   draft,
   isSaving,
@@ -460,6 +491,8 @@ export function ClassificationReview({
   onAutoSave,
   onChangeDraft,
   onMarkNeedsReview,
+  onNext,
+  onPrevious,
   onSave,
   onSelectSimilar,
   onSkip,
@@ -467,11 +500,8 @@ export function ClassificationReview({
   savedState,
   similarCount,
   totalCount,
-  system,
-  category,
   isSaving,
 }: {
-  category: ProjectSystemCategory;
   currentIndex: number;
   draft: DraftChange;
   isSaving: boolean;
@@ -480,95 +510,84 @@ export function ClassificationReview({
   onAutoSave: (draft: DraftChange) => void;
   onChangeDraft: (patch: Partial<DraftChange>) => void;
   onMarkNeedsReview: () => void;
+  onNext: () => void;
+  onPrevious: () => void;
   onSave: () => void;
   onSelectSimilar: () => void;
   onSkip: () => void;
   recentClassifications: DraftChange[];
   savedState: SavedState;
   similarCount: number;
-  system: ProjectSystemSummary;
   totalCount: number;
 }) {
   const canSave = Boolean(draft.systemName && draft.categoryName && (draft.needsReview || draft.subcategoryName));
 
   return (
-    <div className="rounded-[20px] border border-[#e5e7eb] bg-white p-5 shadow-[0_18px_50px_rgba(15,23,42,0.05)]">
-      <div className="flex flex-col gap-4 border-b border-[#e5e7eb] pb-5 lg:flex-row lg:items-start lg:justify-between">
-        <div className="max-w-3xl">
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#16a34a]">Classification Review</p>
-          <h3 className="mt-2 text-2xl font-semibold tracking-tight text-[#0f172a]">
-            Item {currentIndex + 1} / {totalCount}
-          </h3>
-          <p className="mt-2 text-sm leading-6 text-[#64748b]">
-            Approve the AI suggestion or adjust it. Saved corrections update Mnelo memory for future BOQs.
-          </p>
-        </div>
+    <aside className="sticky top-6 grid max-h-[calc(100vh-3rem)] content-start gap-4 overflow-y-auto rounded-[24px] border border-[#e5e7eb] bg-white p-5 shadow-[0_18px_50px_rgba(15,23,42,0.05)]">
+      <div className="flex items-center justify-between gap-3">
         <button
-          className="inline-flex h-10 items-center justify-center rounded-[14px] bg-[#f5f3ff] px-4 text-sm font-semibold text-[#6d28d9] ring-1 ring-[#ddd6fe] transition hover:bg-[#ede9fe]"
-          disabled={similarCount === 0}
-          onClick={onSelectSimilar}
+          className="rounded-full border border-[#e5e7eb] bg-white px-3 py-1.5 text-sm font-semibold text-[#64748b] transition hover:bg-[#f8fafc]"
+          onClick={onPrevious}
           type="button"
         >
-          <Brain aria-hidden="true" className="mr-2 h-4 w-4" strokeWidth={2} />
-          Review similar items ({similarCount})
+          Previous
+        </button>
+        <p className="text-sm font-semibold text-[#0f172a]">
+          Item {currentIndex + 1} of {totalCount}
+        </p>
+        <button
+          className="rounded-full border border-[#e5e7eb] bg-white px-3 py-1.5 text-sm font-semibold text-[#64748b] transition hover:bg-[#f8fafc]"
+          onClick={onNext}
+          type="button"
+        >
+          Next
         </button>
       </div>
 
-      <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_24rem]">
-        <div className="grid gap-4">
-          <div className="rounded-2xl border border-[#e5e7eb] bg-[#f8fafc] p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#64748b]">Item description</p>
-            <p className="mt-3 text-lg font-semibold leading-8 text-[#0f172a]">{item.description}</p>
-            <div className="mt-3 flex flex-wrap gap-2 text-xs text-[#64748b]">
-              <span className="rounded-full bg-white px-2.5 py-1 font-semibold ring-1 ring-[#e5e7eb]">Current: {system.name}</span>
-              <span className="rounded-full bg-white px-2.5 py-1 font-semibold ring-1 ring-[#e5e7eb]">
-                Group: {category.name}
-              </span>
-              <span className="rounded-full bg-white px-2.5 py-1 font-semibold ring-1 ring-[#e5e7eb]">
-                Saved subcategory: {displaySubcategory(item)}
-              </span>
-              {item.sourceSheetName ? (
-                <span className="rounded-full bg-white px-2.5 py-1 font-semibold ring-1 ring-[#e5e7eb]">
-                  Sheet: {item.sourceSheetName}
-                </span>
-              ) : null}
-              {item.sourceRowNumber ? (
-                <span className="rounded-full bg-white px-2.5 py-1 font-semibold ring-1 ring-[#e5e7eb]">
-                  Row: {item.sourceRowNumber}
-                </span>
-              ) : null}
-            </div>
-          </div>
+      <ClassificationSuggestion draft={draft} item={item} />
+      <AIReason reason={item.classificationReason} />
 
-          <ClassificationSuggestion draft={draft} item={item} />
-          <AIReason reason={item.classificationReason} />
-        </div>
+      <ClassificationEditorPanel
+        draft={draft}
+        isSaving={isSaving}
+        onAutoSave={onAutoSave}
+        onChangeDraft={onChangeDraft}
+        recentClassifications={recentClassifications}
+        savedState={savedState}
+      />
 
-        <div className="grid gap-3">
-          <ClassificationEditorPanel
-            draft={draft}
-            isSaving={isSaving}
-            onAutoSave={onAutoSave}
-            onChangeDraft={onChangeDraft}
-            recentClassifications={recentClassifications}
-            savedState={savedState}
-          />
-          <div className="rounded-2xl bg-white p-4 ring-1 ring-[#e5e7eb]">
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#64748b]">Takeoff</p>
-            <p className="mt-2 text-sm font-semibold text-[#0f172a]">
-              {(item.takeoffQuantity ?? item.quantity ?? 0).toLocaleString()} {item.takeoffUnit || item.unit || "item"}
-            </p>
-            <p className="mt-1 text-sm text-[#64748b]">{item.amount === null ? "No amount extracted" : `${item.amount.toLocaleString()} total`}</p>
+      <div className="rounded-2xl border border-[#e5e7eb] bg-[#fbfdfb] p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-[#0f172a]">Similar items ({similarCount})</p>
+            <p className="mt-1 text-sm text-[#64748b]">AI found {similarCount} possible similar items.</p>
           </div>
-          {draft.needsReview ? (
-            <div className="rounded-2xl border border-[#fed7aa] bg-[#fff7ed] p-4 text-sm font-semibold text-[#c2410c]">
-              This item will stay in review until a final category is confirmed.
-            </div>
-          ) : null}
+          <button
+            className="rounded-[14px] bg-[#f5f3ff] px-3 py-2 text-sm font-semibold text-[#6d28d9] ring-1 ring-[#ddd6fe] transition hover:bg-[#ede9fe] disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={similarCount === 0}
+            onClick={onSelectSimilar}
+            type="button"
+          >
+            Preview
+          </button>
         </div>
       </div>
 
-      <div className="mt-5">
+      <div className="rounded-2xl bg-white p-4 ring-1 ring-[#e5e7eb]">
+        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#64748b]">Current item</p>
+        <p className="mt-2 text-sm font-semibold text-[#0f172a]">
+          {(item.takeoffQuantity ?? item.quantity ?? 0).toLocaleString()} {item.takeoffUnit || item.unit || "item"}
+        </p>
+        <p className="mt-1 text-sm text-[#64748b]">{item.amount === null ? "No amount extracted" : `${item.amount.toLocaleString()} total`}</p>
+      </div>
+
+      {draft.needsReview ? (
+        <div className="rounded-2xl border border-[#fed7aa] bg-[#fff7ed] p-4 text-sm font-semibold text-[#c2410c]">
+          This item will stay in review until a final category is confirmed.
+        </div>
+      ) : null}
+
+      <div className="mt-1">
         <ReviewActions
           canContinue={canSave}
           isSaving={isSaving}
@@ -578,15 +597,19 @@ export function ClassificationReview({
           onSkip={onSkip}
         />
       </div>
-    </div>
+    </aside>
   );
 }
 
 export function ProjectSystemsPanel({
+  fileName,
   projectId,
+  projectName,
   systems,
 }: {
+  fileName: string;
   projectId: string;
+  projectName: string;
   systems: ProjectSystemSummary[];
 }) {
   const router = useRouter();
@@ -602,10 +625,8 @@ export function ProjectSystemsPanel({
   const [savedState, setSavedState] = useState<SavedState>("idle");
   const [showSimilarReview, setShowSimilarReview] = useState(false);
   const [notice, setNotice] = useState<{ tone: "success" | "error"; message: string } | null>(null);
-  const [systemFilter, setSystemFilter] = useState("all");
-  const [categoryFilter, setCategoryFilter] = useState("all");
-  const [sourceFilter, setSourceFilter] = useState<(typeof sourceOptions)[number]>("all");
-  const [needsReviewOnly, setNeedsReviewOnly] = useState(false);
+  const [selectedGroupKey, setSelectedGroupKey] = useState<string | null>(null);
+  const [batchSelectedIds, setBatchSelectedIds] = useState<string[]>([]);
   const [search, setSearch] = useState("");
 
   const allRows = useMemo(
@@ -630,36 +651,39 @@ export function ProjectSystemsPanel({
 
     return map;
   }, [allRows]);
-  const categoryOptions = useMemo(
-    () =>
-      Array.from(new Set(allRows.flatMap((row) => [row.category.name, displaySubcategory(row.item)]))).sort((a, b) =>
-        a.localeCompare(b),
-      ),
-    [allRows],
-  );
+  const reviewGroups = useMemo(() => {
+    const groups = new Map<string, ReviewGroup>();
+
+    for (const row of allRows) {
+      const name = groupNameForRow(row);
+      const key = `${row.system.name}::${name}`;
+      const existing = groups.get(key);
+
+      if (existing) {
+        existing.rows.push(row);
+        existing.totalCount += 1;
+        existing.needsReviewCount += row.item.needsReview ? 1 : 0;
+      } else {
+        groups.set(key, {
+          key,
+          name,
+          needsReviewCount: row.item.needsReview ? 1 : 0,
+          rows: [row],
+          totalCount: 1,
+        });
+      }
+    }
+
+    return Array.from(groups.values()).sort(
+      (left, right) => right.needsReviewCount - left.needsReviewCount || right.totalCount - left.totalCount || left.name.localeCompare(right.name),
+    );
+  }, [allRows]);
+  const activeGroup = reviewGroups.find((group) => group.key === selectedGroupKey) || reviewGroups[0] || null;
   const filteredRows = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
 
-    return allRows.filter((row) => {
-      if (systemFilter !== "all" && row.system.name !== systemFilter) {
-        return false;
-      }
-
-      if (categoryFilter !== "all" && row.category.name !== categoryFilter && displaySubcategory(row.item) !== categoryFilter) {
-        return false;
-      }
-
-      if (sourceFilter !== "all" && row.item.classificationSource !== sourceFilter) {
-        return false;
-      }
-
-      if (needsReviewOnly && !row.item.needsReview) {
-        return false;
-      }
-
-      return !normalizedSearch || row.item.description.toLowerCase().includes(normalizedSearch);
-    });
-  }, [allRows, categoryFilter, needsReviewOnly, search, sourceFilter, systemFilter]);
+    return (activeGroup?.rows || []).filter((row) => !normalizedSearch || row.item.description.toLowerCase().includes(normalizedSearch));
+  }, [activeGroup, search]);
   const focusedRow = filteredRows.find((row) => row.item.id === activeItemId) || filteredRows[0] || null;
   const focusedIndex = focusedRow ? filteredRows.findIndex((row) => row.item.id === focusedRow.item.id) : -1;
   const dirtyCount = Object.keys(drafts).length;
@@ -949,175 +973,263 @@ export function ProjectSystemsPanel({
   }, [filteredRows, focusedRow]);
 
   return (
-    <section className="rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-[0_18px_50px_rgba(15,23,42,0.04)]">
-      <div className="flex flex-col gap-4 border-b border-[#e5e7eb] pb-4 md:flex-row md:items-end md:justify-between">
+    <section className="rounded-[24px] border border-[#e5e7eb] bg-[#f8fafc] p-4 shadow-[0_18px_50px_rgba(15,23,42,0.04)]">
+      <header className="flex flex-col gap-4 rounded-[20px] border border-[#e5e7eb] bg-white p-5 md:flex-row md:items-center md:justify-between">
         <div>
-          <h2 className="text-lg font-semibold tracking-tight text-[#07130f]">Intelligence</h2>
-          <p className="mt-1 text-sm text-slate-500">
-            Review Mnelo classifications, approve decisions, and teach the AI memory for future procurement packages.
-          </p>
+          <h2 className="text-2xl font-semibold tracking-tight text-[#07130f]">Classification Review - Optimized</h2>
+          <p className="mt-1 text-sm text-slate-500">Fast review. Grouped by category. Review only what matters.</p>
         </div>
-        <button
-          className="inline-flex h-10 items-center justify-center rounded-xl bg-[#16a34a] px-4 text-sm font-semibold text-white shadow-[0_12px_28px_rgba(22,163,74,0.22)] transition hover:bg-[#087a36] disabled:cursor-not-allowed disabled:opacity-60"
-          disabled={isClassifying || sourceSummary.refinementQueueCount === 0}
-          onClick={async () => {
-            if (isClassifying) {
-              return;
-            }
-
-            setIsClassifying(true);
-            setNotice(null);
-
-            try {
-              const formData = new FormData();
-              formData.set("project_id", projectId);
-              const result = await classifyProjectBoqItems(formData);
-
-              if (!result.ok) {
-                const message = result.error || "Classification failed.";
-                console.error(message);
-                setNotice({ tone: "error", message });
-                return;
-              }
-
-              setNotice({ tone: "success", message: result.message || "BOQ items classified." });
-              router.refresh();
-            } catch (error) {
-              console.error(error);
-              setNotice({
-                tone: "error",
-                message: error instanceof Error ? error.message : "Unknown classification error.",
-              });
-            } finally {
-              setIsClassifying(false);
-            }
-          }}
-          type="button"
-        >
-          <Sparkles aria-hidden="true" className="mr-2 h-4 w-4" strokeWidth={2} />
-          {isClassifying
-            ? "Refining..."
-            : sourceSummary.refinementQueueCount > 0
-              ? `AI refine ${sourceSummary.refinementQueueCount}`
-              : "Classification complete"}
-        </button>
-      </div>
-
-      <div className="mt-5 grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,2fr)]">
-        <div className="rounded-2xl border border-[#bbf7d0] bg-[#ecfdf3] p-4">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#087a36]">Review progress</p>
-              <p className="mt-2 text-2xl font-semibold text-[#07130f]">
-                Reviewed {reviewedCount.toLocaleString()} / {sourceSummary.total.toLocaleString()}
-              </p>
-              <p className="mt-1 text-sm text-[#64748b]">
-                Needs Review: {sourceSummary.needsReviewCount.toLocaleString()} · Auto-classified:{" "}
-                {sourceSummary.highConfidenceCount.toLocaleString()}
-              </p>
-            </div>
-            <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-[#087a36] ring-1 ring-[#bbf7d0]">
-              {sourceSummary.refinementQueueCount.toLocaleString()} waiting
-            </span>
-          </div>
-          <div className="mt-4 h-2 overflow-hidden rounded-full bg-white">
-            <div className="h-full rounded-full bg-[#16a34a] transition-all" style={{ width: `${reviewedPercent}%` }} />
-          </div>
-          <p className="mt-3 text-xs text-[#64748b]">
-            Approvals update classification memory. Learned/manual rows stay protected during future runs.
-          </p>
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          <KeyboardShortcutsHint />
+          <span className="rounded-full bg-[#ecfdf3] px-3 py-1 font-semibold text-[#087a36] ring-1 ring-[#bbf7d0]">
+            {Math.max(0, focusedIndex + 1)} / {filteredRows.length || sourceSummary.total}
+          </span>
+          <button
+            className="rounded-[14px] border border-[#e5e7eb] bg-white px-4 py-2 font-semibold text-[#64748b] transition hover:bg-[#f8fafc]"
+            type="button"
+          >
+            Pause review
+          </button>
         </div>
-        <div className="grid gap-2 rounded-2xl border border-[#e5e7eb] bg-[#fbfdfb] p-4 sm:grid-cols-5">
-          {sourceSummaryOrder.map((source) => (
-            <button
-              className="rounded-xl border border-[#e5e7eb] bg-white p-3 text-left transition hover:border-[#bbf7d0] hover:bg-[#ecfdf3]"
-              key={source}
-              onClick={() => setSourceFilter(source)}
-              type="button"
-            >
-              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#94a3b8]">{sourceLabel(source)}</p>
-              <p className="mt-2 text-xl font-semibold text-[#07130f]">{sourceSummary.counts[source].toLocaleString()}</p>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="mt-5 grid gap-3 rounded-2xl border border-[#e5e7eb] bg-[#fbfdfb] p-4 lg:grid-cols-[1fr_11rem_11rem_11rem_auto]">
-        <label className="relative block">
-          <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#94a3b8]" />
-          <input
-            ref={searchInputRef}
-            className="h-10 w-full rounded-xl border border-[#e5e7eb] bg-white pl-9 pr-3 text-sm outline-none transition placeholder:text-[#94a3b8] focus:border-[#16a34a] focus:ring-4 focus:ring-[#dcfce7]"
-            onChange={(event) => setSearch(event.currentTarget.value)}
-            placeholder="Search item description..."
-            value={search}
-          />
-        </label>
-        <select
-          className="h-10 rounded-xl border border-[#e5e7eb] bg-white px-3 text-sm text-[#334155] outline-none focus:border-[#16a34a] focus:ring-4 focus:ring-[#dcfce7]"
-          onChange={(event) => setSystemFilter(event.currentTarget.value)}
-          value={systemFilter}
-        >
-          <option value="all">All systems</option>
-          {systems.map((system) => (
-            <option key={system.name} value={system.name}>
-              {system.name}
-            </option>
-          ))}
-        </select>
-        <select
-          className="h-10 rounded-xl border border-[#e5e7eb] bg-white px-3 text-sm text-[#334155] outline-none focus:border-[#16a34a] focus:ring-4 focus:ring-[#dcfce7]"
-          onChange={(event) => setCategoryFilter(event.currentTarget.value)}
-          value={categoryFilter}
-        >
-          <option value="all">All categories</option>
-          {categoryOptions.map((category) => (
-            <option key={category} value={category}>
-              {category}
-            </option>
-          ))}
-        </select>
-        <select
-          className="h-10 rounded-xl border border-[#e5e7eb] bg-white px-3 text-sm text-[#334155] outline-none focus:border-[#16a34a] focus:ring-4 focus:ring-[#dcfce7]"
-          onChange={(event) => setSourceFilter(event.currentTarget.value as (typeof sourceOptions)[number])}
-          value={sourceFilter}
-        >
-          {sourceOptions.map((source) => (
-            <option key={source} value={source}>
-              {source === "all" ? "All sources" : sourceLabel(source)}
-            </option>
-          ))}
-        </select>
-        <label className="inline-flex h-10 items-center gap-2 whitespace-nowrap rounded-xl border border-[#e5e7eb] bg-white px-3 text-sm font-semibold text-[#64748b]">
-          <input
-            checked={needsReviewOnly}
-            className="h-4 w-4 rounded border-[#cbd5e1] text-[#16a34a] focus:ring-[#16a34a]"
-            onChange={(event) => setNeedsReviewOnly(event.currentTarget.checked)}
-            type="checkbox"
-          />
-          Needs Review
-        </label>
-      </div>
+      </header>
 
       {notice ? (
-        <div className="mt-5">
+        <div className="mt-4">
           {notice.tone === "error" ? (
             <ErrorMessage message={notice.message} />
           ) : (
             <div className="flex flex-col gap-3 rounded-xl border border-[#bbf7d0] bg-[#ecfdf3] px-4 py-3 text-sm text-[#087a36] sm:flex-row sm:items-center sm:justify-between">
               <span>{notice.message}</span>
               <button className="font-semibold underline-offset-4 hover:underline" onClick={() => router.refresh()} type="button">
-                Apply changes / Refresh view
+                Refresh view
               </button>
             </div>
           )}
         </div>
       ) : null}
 
-      {focusedRow ? (
-        <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_24rem]">
+      <div className="mt-5 grid gap-5 xl:grid-cols-[280px_minmax(0,1fr)_380px]">
+        <aside className="grid content-start gap-4 rounded-[22px] border border-[#e5e7eb] bg-white p-4">
+          <div className="rounded-[20px] bg-[#f8fafc] p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#64748b]">Project</p>
+            <h3 className="mt-2 text-lg font-semibold text-[#0f172a]">{projectName}</h3>
+            <p className="mt-2 line-clamp-2 text-sm text-[#64748b]">{fileName}</p>
+            <p className="mt-3 text-sm font-semibold text-[#087a36]">{sourceSummary.total.toLocaleString()} extracted items</p>
+          </div>
+
+          <div className="rounded-[20px] border border-[#e5e7eb] bg-white p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#64748b]">AI Summary</p>
+            <div className="mt-3 grid gap-3 text-sm">
+              <SummaryLine label="Auto-classified" value={`${sourceSummary.highConfidenceCount.toLocaleString()} (${reviewedPercent}%)`} />
+              <SummaryLine label="Need review" value={`${sourceSummary.refinementQueueCount.toLocaleString()}`} />
+              <SummaryLine label="Flagged" value={sourceSummary.needsReviewCount.toLocaleString()} />
+              <SummaryLine label="Total" value={sourceSummary.total.toLocaleString()} />
+            </div>
+            <div className="mt-4 h-2 overflow-hidden rounded-full bg-[#f1f5f9]">
+              <div className="h-full rounded-full bg-[#16a34a] transition-all" style={{ width: `${reviewedPercent}%` }} />
+            </div>
+          </div>
+
+          <div className="rounded-[20px] border border-[#e5e7eb] bg-white p-3">
+            <div className="flex items-center justify-between gap-3 px-1 pb-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#64748b]">Group by Category</p>
+              <button
+                className="text-xs font-semibold text-[#16a34a] disabled:text-slate-300"
+                disabled={isClassifying || sourceSummary.refinementQueueCount === 0}
+                onClick={async () => {
+                  if (isClassifying) return;
+                  setIsClassifying(true);
+                  setNotice(null);
+                  try {
+                    const formData = new FormData();
+                    formData.set("project_id", projectId);
+                    const result = await classifyProjectBoqItems(formData);
+                    if (!result.ok) {
+                      setNotice({ tone: "error", message: result.error || "Classification failed." });
+                      return;
+                    }
+                    setNotice({ tone: "success", message: result.message || "BOQ items classified." });
+                    router.refresh();
+                  } catch (error) {
+                    setNotice({ tone: "error", message: error instanceof Error ? error.message : "Unknown classification error." });
+                  } finally {
+                    setIsClassifying(false);
+                  }
+                }}
+                type="button"
+              >
+                {isClassifying ? "Refining..." : "AI refine"}
+              </button>
+            </div>
+            <div className="grid max-h-[580px] gap-1 overflow-y-auto pr-1">
+              {reviewGroups.map((group) => {
+                const selected = group.key === activeGroup?.key;
+                return (
+                  <button
+                    className={
+                      selected
+                        ? "rounded-2xl bg-[#ecfdf3] px-3 py-3 text-left ring-1 ring-[#bbf7d0]"
+                        : "rounded-2xl px-3 py-3 text-left transition hover:bg-[#f8fafc]"
+                    }
+                    key={group.key}
+                    onClick={() => {
+                      setSelectedGroupKey(group.key);
+                      setActiveItemId(group.rows[0]?.item.id || null);
+                      setBatchSelectedIds([]);
+                    }}
+                    type="button"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="line-clamp-1 text-sm font-semibold text-[#0f172a]">{group.name}</span>
+                      <span className="text-sm font-semibold text-[#64748b]">{group.totalCount}</span>
+                    </div>
+                    {group.needsReviewCount > 0 ? (
+                      <p className="mt-1 text-xs font-semibold text-[#b45309]">{group.needsReviewCount} need review</p>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </aside>
+
+        <main className="rounded-[22px] border border-[#e5e7eb] bg-white p-4">
+          <div className="flex flex-col gap-4 border-b border-[#e5e7eb] pb-4 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#64748b]">Reviewing</p>
+              <h3 className="mt-1 text-2xl font-semibold text-[#0f172a]">{activeGroup?.name || "No group"}</h3>
+              <p className="mt-1 text-sm text-[#64748b]">
+                {activeGroup?.needsReviewCount || 0} items need review · {filteredRows.length.toLocaleString()} visible
+              </p>
+            </div>
+            <label className="relative block min-w-0 md:w-80">
+              <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#94a3b8]" />
+              <input
+                ref={searchInputRef}
+                className="h-11 w-full rounded-xl border border-[#e5e7eb] bg-white pl-9 pr-3 text-sm outline-none transition placeholder:text-[#94a3b8] focus:border-[#16a34a] focus:ring-4 focus:ring-[#dcfce7]"
+                onChange={(event) => setSearch(event.currentTarget.value)}
+                placeholder="Search this group..."
+                value={search}
+              />
+            </label>
+          </div>
+
+          {focusedRow ? (
+            <div className="mt-4 overflow-hidden rounded-[20px] border border-[#e5e7eb]">
+              <div className="grid grid-cols-[44px_72px_minmax(0,1fr)_90px_72px_112px_112px] gap-3 bg-[#f8fafc] px-4 py-3 text-xs font-semibold uppercase tracking-[0.12em] text-[#94a3b8]">
+                <span />
+                <span>Row</span>
+                <span>Description</span>
+                <span>Quantity</span>
+                <span>Unit</span>
+                <span>Confidence</span>
+                <span>Status</span>
+              </div>
+              <div className="max-h-[650px] divide-y divide-[#eef2f7] overflow-y-auto">
+                {filteredRows.map((row) => {
+                  const selected = row.item.id === focusedRow.item.id;
+                  const checked = batchSelectedIds.includes(row.item.id);
+                  const draft = displayDraft(row);
+                  return (
+                    <button
+                      className={
+                        selected
+                          ? "grid w-full grid-cols-[44px_72px_minmax(0,1fr)_90px_72px_112px_112px] gap-3 border-l-4 border-[#16a34a] bg-[#ecfdf3] px-4 py-4 text-left"
+                          : "grid w-full grid-cols-[44px_72px_minmax(0,1fr)_90px_72px_112px_112px] gap-3 px-4 py-4 text-left transition hover:bg-[#fbfdfb]"
+                      }
+                      key={row.item.id}
+                      onClick={() => setActiveItemId(row.item.id)}
+                      type="button"
+                    >
+                      <span onClick={(event) => event.stopPropagation()}>
+                        <input
+                          checked={checked}
+                          className="mt-1 h-4 w-4 rounded border-[#cbd5e1] text-[#16a34a] focus:ring-[#16a34a]"
+                          onChange={(event) => {
+                            const isChecked = event.currentTarget.checked;
+                            setBatchSelectedIds((previous) =>
+                              isChecked ? Array.from(new Set([...previous, row.item.id])) : previous.filter((itemId) => itemId !== row.item.id),
+                            );
+                          }}
+                          type="checkbox"
+                        />
+                      </span>
+                      <span className="text-sm font-semibold text-[#64748b]">{row.item.sourceRowNumber || row.item.rowNumber || "-"}</span>
+                      <span>
+                        <span className="line-clamp-2 text-sm font-semibold leading-6 text-[#0f172a]">{row.item.description}</span>
+                        <span className="mt-1 flex flex-wrap gap-1 text-[11px] font-semibold text-[#64748b]">
+                          {row.item.sourceSheetName ? <span className="rounded-full bg-white px-2 py-0.5 ring-1 ring-[#e5e7eb]">{row.item.sourceSheetName}</span> : null}
+                          {row.item.sourceRowNumber ? <span className="rounded-full bg-white px-2 py-0.5 ring-1 ring-[#e5e7eb]">Row {row.item.sourceRowNumber}</span> : null}
+                        </span>
+                      </span>
+                      <span className="text-sm font-semibold text-[#64748b]">{row.item.quantity ?? "-"}</span>
+                      <span className="text-sm font-semibold text-[#64748b]">{row.item.unit || "-"}</span>
+                      <span>
+                        <ConfidenceBadge confidence={row.item.confidenceScore} needsReview={row.item.needsReview || draft.needsReview} />
+                      </span>
+                      <span>
+                        <span
+                          className={
+                            row.item.needsReview || draft.needsReview
+                              ? "rounded-full bg-[#fff7ed] px-3 py-1 text-xs font-semibold text-[#c2410c] ring-1 ring-[#fed7aa]"
+                              : "rounded-full bg-[#ecfdf3] px-3 py-1 text-xs font-semibold text-[#087a36] ring-1 ring-[#bbf7d0]"
+                          }
+                        >
+                          {row.item.needsReview || draft.needsReview ? "Review" : "Approved"}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            <div className="mt-5">
+              <EmptyState title="No matching review items" description="Choose a group or adjust search to continue reviewing classifications." />
+            </div>
+          )}
+
+          <div className="mt-4 flex flex-col gap-3 rounded-[20px] border border-[#e5e7eb] bg-[#f8fafc] p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-wrap items-center gap-3 text-sm text-[#64748b]">
+              <button
+                className="font-semibold text-[#087a36]"
+                onClick={() => setBatchSelectedIds(filteredRows.map((row) => row.item.id))}
+                type="button"
+              >
+                Select all items
+              </button>
+              <span>{batchSelectedIds.length.toLocaleString()} selected</span>
+              <select className="h-10 rounded-xl border border-[#e5e7eb] bg-white px-3 text-sm font-semibold text-[#64748b]" defaultValue="">
+                <option value="" disabled>
+                  Batch actions
+                </option>
+                <option>Apply current classification</option>
+                <option>Mark needs review</option>
+              </select>
+            </div>
+            <button
+              className="rounded-[14px] bg-[#16a34a] px-4 py-2 text-sm font-semibold text-white shadow-[0_12px_28px_rgba(22,163,74,0.18)] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500 disabled:shadow-none"
+              disabled={batchSelectedIds.length === 0 || !focusedRow}
+              onClick={() => {
+                if (!focusedRow) return;
+                const draft = displayDraft(focusedRow);
+                void saveDrafts(
+                  batchSelectedIds,
+                  `Classification saved for ${batchSelectedIds.length.toLocaleString()} selected item${batchSelectedIds.length === 1 ? "" : "s"}.`,
+                  false,
+                  draft,
+                );
+                setBatchSelectedIds([]);
+              }}
+              type="button"
+            >
+              Preview changes
+            </button>
+          </div>
+        </main>
+
+        {focusedRow ? (
           <ClassificationReview
-            category={focusedRow.category}
             currentIndex={Math.max(0, focusedIndex)}
             draft={displayDraft(focusedRow)}
             isSaving={isSaving}
@@ -1126,13 +1238,14 @@ export function ProjectSystemsPanel({
             onAutoSave={autoSaveFocusedRow}
             onChangeDraft={(patch) => updateDraft(focusedRow.item.id, patch)}
             onMarkNeedsReview={markFocusedNeedsReview}
+            onNext={() => setActiveItemId(nextRowAfter(focusedRow.item.id)?.item.id || null)}
+            onPrevious={() => setActiveItemId(previousRowBefore(focusedRow.item.id)?.item.id || null)}
             onSave={() => void saveDrafts([focusedRow.item.id], "Classification saved. AI memory updated.")}
             onSelectSimilar={() => {
               if (similarCandidates.length === 0) {
                 setNotice({ tone: "success", message: "No similar visible items found for this selection." });
                 return;
               }
-
               setSelectedSimilarIds([]);
               setShowSimilarReview(true);
             }}
@@ -1140,177 +1253,93 @@ export function ProjectSystemsPanel({
             recentClassifications={recentClassifications}
             savedState={savedState}
             similarCount={similarCandidates.length}
-            system={focusedRow.system}
             totalCount={filteredRows.length}
           />
+        ) : null}
+      </div>
 
-          {showSimilarReview ? (
-            <div className="rounded-[20px] border border-[#ddd6fe] bg-[#faf5ff] p-5 xl:col-start-1">
-              <div className="flex flex-col gap-3 border-b border-[#ddd6fe] pb-4 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#7c3aed]">Review similar items</p>
-                  <h3 className="mt-2 text-lg font-semibold text-[#0f172a]">Select only the rows that should receive this correction.</h3>
-                  <p className="mt-1 text-sm leading-6 text-[#64748b]">
-                    Candidates are unchecked by default. Same system or category is not enough; Mnelo only suggests strong product identity matches.
-                  </p>
-                </div>
-                <button
-                  className="rounded-[14px] bg-white px-4 py-2 text-sm font-semibold text-[#64748b] ring-1 ring-[#ddd6fe] transition hover:bg-[#f8fafc]"
-                  onClick={() => {
-                    setSelectedSimilarIds([]);
-                    setShowSimilarReview(false);
-                  }}
-                  type="button"
-                >
-                  Cancel
-                </button>
-              </div>
-
-              <div className="mt-4 rounded-2xl border border-[#e5e7eb] bg-white p-4">
-                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#94a3b8]">Source item</p>
-                <p className="mt-2 text-sm font-semibold leading-6 text-[#0f172a]">{focusedRow.item.description}</p>
-              </div>
-
-              <div className="mt-4 grid max-h-[420px] gap-3 overflow-y-auto pr-1">
-                {similarCandidates.map((candidate) => {
-                  const selected = selectedSimilarIds.includes(candidate.item.id);
-
-                  return (
-                    <label
-                      className={`grid cursor-pointer gap-3 rounded-2xl border p-4 transition ${
-                        selected ? "border-[#7c3aed] bg-white" : "border-[#e5e7eb] bg-white/80 hover:border-[#c4b5fd]"
-                      }`}
-                      key={candidate.item.id}
-                    >
-                      <div className="flex items-start gap-3">
-                        <input
-                          checked={selected}
-                          className="mt-1 h-4 w-4 rounded border-[#cbd5e1] text-[#7c3aed] focus:ring-[#7c3aed]"
-                          onChange={(event) => {
-                            const checked = event.currentTarget.checked;
-                            setSelectedSimilarIds((previous) =>
-                              checked
-                                ? Array.from(new Set([...previous, candidate.item.id]))
-                                : previous.filter((itemId) => itemId !== candidate.item.id),
-                            );
-                          }}
-                          type="checkbox"
-                        />
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold leading-6 text-[#0f172a]">{candidate.item.description}</p>
-                          <p className="mt-1 text-xs font-medium text-[#64748b]">
-                            {candidate.system.name} / {candidate.category.name} / {displaySubcategory(candidate.item)}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="rounded-xl bg-[#f8fafc] px-3 py-2 text-xs font-medium text-[#64748b]">
-                        Why suggested: {candidate.match.reason}
-                      </div>
-                    </label>
-                  );
-                })}
-              </div>
-
-              <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <p className="text-sm text-[#64748b]">
-                  {selectedSimilarIds.length.toLocaleString()} selected. Saved rows stay editable after this action.
-                </p>
-                <button
-                  className="inline-flex h-11 items-center justify-center rounded-[14px] bg-[#16a34a] px-5 text-sm font-semibold text-white shadow-[0_14px_32px_rgba(22,163,74,0.22)] transition hover:bg-[#087a36] disabled:cursor-not-allowed disabled:opacity-60"
-                  disabled={selectedSimilarIds.length === 0 || isSaving}
-                  onClick={() => {
-                    const draft = displayDraft(focusedRow);
-                    void saveDrafts(
-                      selectedSimilarIds,
-                      `Classification saved. AI memory updated for ${selectedSimilarIds.length.toLocaleString()} selected similar item${selectedSimilarIds.length === 1 ? "" : "s"}.`,
-                      false,
-                      draft,
-                    );
-                    setShowSimilarReview(false);
-                    setSelectedSimilarIds([]);
-                  }}
-                  type="button"
-                >
-                  {isSaving ? "Saving..." : "Save selected corrections"}
-                </button>
-              </div>
-            </div>
-          ) : null}
-
-          <aside className="rounded-[20px] border border-[#e5e7eb] bg-[#fbfdfb] p-4">
-            <div className="flex items-center justify-between gap-3">
+      {showSimilarReview && focusedRow ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 px-4">
+          <div className="max-h-[86vh] w-full max-w-4xl overflow-y-auto rounded-[28px] bg-white p-6 shadow-[0_34px_100px_rgba(15,23,42,0.24)]">
+            <div className="flex flex-col gap-3 border-b border-[#e5e7eb] pb-4 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#64748b]">Review queue</p>
-                <p className="mt-1 text-sm text-[#64748b]">{filteredRows.length.toLocaleString()} visible decisions</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#7c3aed]">Similar items safety preview</p>
+                <h3 className="mt-2 text-xl font-semibold text-[#0f172a]">Select only the rows that should receive this correction.</h3>
+                <p className="mt-1 text-sm leading-6 text-[#64748b]">
+                  Nothing is selected automatically. Review why each item matched before applying.
+                </p>
               </div>
               <button
-                className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-[#087a36] ring-1 ring-[#bbf7d0] transition hover:bg-[#ecfdf3] disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={dirtyCount === 0 || isSavingBulk}
-                onClick={() => void saveUnsavedDrafts()}
+                className="rounded-[14px] bg-white px-4 py-2 text-sm font-semibold text-[#64748b] ring-1 ring-[#e5e7eb] transition hover:bg-[#f8fafc]"
+                onClick={() => {
+                  setSelectedSimilarIds([]);
+                  setShowSimilarReview(false);
+                }}
                 type="button"
               >
-                {isSavingBulk ? "Saving..." : dirtyCount > 0 ? `Save unsaved (${dirtyCount})` : "No unsaved rows"}
+                Close
               </button>
             </div>
-            <div className="mt-4 grid max-h-[720px] gap-2 overflow-y-auto pr-1">
-              {filteredRows.map((row) => {
-                const active = row.item.id === focusedRow.item.id;
-                const draft = displayDraft(row);
-                const dirty = Boolean(drafts[row.item.id]);
-
+            <div className="mt-4 grid gap-3">
+              {similarCandidates.map((candidate) => {
+                const selected = selectedSimilarIds.includes(candidate.item.id);
                 return (
-                  <button
-                    className={`rounded-2xl border p-3 text-left transition ${
-                      active
-                        ? "border-[#16a34a] bg-[#ecfdf3] shadow-[0_14px_30px_rgba(22,163,74,0.12)]"
-                        : "border-[#e5e7eb] bg-white hover:border-[#bbf7d0] hover:bg-[#f8faf8]"
+                  <label
+                    className={`grid cursor-pointer gap-3 rounded-2xl border p-4 transition ${
+                      selected ? "border-[#7c3aed] bg-[#faf5ff]" : "border-[#e5e7eb] bg-white hover:border-[#c4b5fd]"
                     }`}
-                    key={row.item.id}
-                    onClick={() => setActiveItemId(row.item.id)}
-                    type="button"
+                    key={candidate.item.id}
                   >
-                    <div className="flex items-start justify-between gap-2">
-                      <p className="line-clamp-2 text-sm font-semibold leading-5 text-[#0f172a]">{row.item.description}</p>
-                      {row.item.needsReview || draft.needsReview ? (
-                        <AlertCircle aria-hidden="true" className="h-4 w-4 shrink-0 text-[#f59e0b]" strokeWidth={2} />
-                      ) : (
-                        <CheckCircle2 aria-hidden="true" className="h-4 w-4 shrink-0 text-[#16a34a]" strokeWidth={2} />
-                      )}
+                    <div className="flex items-start gap-3">
+                      <input
+                        checked={selected}
+                        className="mt-1 h-4 w-4 rounded border-[#cbd5e1] text-[#7c3aed] focus:ring-[#7c3aed]"
+                        onChange={(event) => {
+                          const checked = event.currentTarget.checked;
+                          setSelectedSimilarIds((previous) =>
+                            checked ? Array.from(new Set([...previous, candidate.item.id])) : previous.filter((itemId) => itemId !== candidate.item.id),
+                          );
+                        }}
+                        type="checkbox"
+                      />
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold leading-6 text-[#0f172a]">{candidate.item.description}</p>
+                        <p className="mt-1 text-xs font-medium text-[#64748b]">
+                          Current: {candidate.system.name} / {candidate.category.name} / {displaySubcategory(candidate.item)}
+                        </p>
+                        <p className="mt-2 rounded-xl bg-[#f8fafc] px-3 py-2 text-xs font-medium text-[#64748b]">
+                          Why matched: {candidate.match.reason} · {Math.round(candidate.match.score * 100)}% confidence
+                        </p>
+                      </div>
                     </div>
-                    <div className="mt-3 flex flex-wrap gap-1.5">
-                      <span className="rounded-full bg-[#f8fafc] px-2 py-0.5 text-[11px] font-semibold text-[#64748b] ring-1 ring-[#e5e7eb]">
-                        {draft.systemName}
-                      </span>
-                      <span className="rounded-full bg-[#f8fafc] px-2 py-0.5 text-[11px] font-semibold text-[#64748b] ring-1 ring-[#e5e7eb]">
-                        {draft.subcategoryName || "Needs review"}
-                      </span>
-                      {dirty ? (
-                        <span className="rounded-full bg-[#f5f3ff] px-2 py-0.5 text-[11px] font-semibold text-[#7c3aed] ring-1 ring-[#ddd6fe]">
-                          Unsaved
-                        </span>
-                      ) : null}
-                    </div>
-                  </button>
+                  </label>
                 );
               })}
             </div>
-          </aside>
+            <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-[#64748b]">{selectedSimilarIds.length.toLocaleString()} selected. Undo is available through saved manual edits.</p>
+              <button
+                className="inline-flex h-11 items-center justify-center rounded-[14px] bg-[#16a34a] px-5 text-sm font-semibold text-white shadow-[0_14px_32px_rgba(22,163,74,0.22)] transition hover:bg-[#087a36] disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={selectedSimilarIds.length === 0 || isSaving}
+                onClick={() => {
+                  const draft = displayDraft(focusedRow);
+                  void saveDrafts(
+                    selectedSimilarIds,
+                    `Classification saved. AI memory updated for ${selectedSimilarIds.length.toLocaleString()} selected similar item${selectedSimilarIds.length === 1 ? "" : "s"}.`,
+                    false,
+                    draft,
+                  );
+                  setShowSimilarReview(false);
+                  setSelectedSimilarIds([]);
+                }}
+                type="button"
+              >
+                {isSaving ? "Saving..." : "Preview changes / Apply selected"}
+              </button>
+            </div>
+          </div>
         </div>
-      ) : (
-        <div className="mt-5">
-          {systems.length === 0 ? (
-            <EmptyState
-              title="No systems yet"
-              description="Upload and parse a BOQ file, then run classification to create project systems and takeoff summaries."
-            />
-          ) : (
-            <EmptyState
-              title="No matching review items"
-              description="Adjust filters or search to continue reviewing classifications."
-            />
-          )}
-        </div>
-      )}
+      ) : null}
     </section>
   );
 }
