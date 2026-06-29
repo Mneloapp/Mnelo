@@ -316,9 +316,10 @@ export function SavedStateIndicator({ state }: { state: SavedState }) {
 
 export function KeyboardShortcutsHint() {
   return (
-    <div className="rounded-2xl border border-[#e5e7eb] bg-white p-3 text-xs leading-6 text-[#64748b]">
-      <span className="font-semibold text-[#0f172a]">Shortcuts:</span> Enter approve · S skip · N needs review · Ctrl/Cmd+K
-      search · ←/→ previous/next · Esc close panel
+    <div className="rounded-full border border-[#e5e7eb] bg-white px-4 py-2 text-xs font-semibold text-[#475569] shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+      ⌘ Shortcuts: Enter = Next <span className="mx-2 text-[#cbd5e1]">|</span> S = Skip{" "}
+      <span className="mx-2 text-[#cbd5e1]">|</span> N = Needs Review{" "}
+      <span className="mx-2 text-[#cbd5e1]">|</span> Ctrl+K = Search
     </div>
   );
 }
@@ -442,9 +443,9 @@ export function ReviewActions({
   onSkip: () => void;
 }) {
   return (
-    <div className="flex flex-col gap-2 border-t border-[#e5e7eb] pt-4 sm:flex-row sm:items-center sm:justify-between">
+    <div className="grid gap-3 border-t border-[#e5e7eb] pt-4">
       <button
-        className="inline-flex h-11 items-center justify-center rounded-[14px] bg-[#16a34a] px-5 text-sm font-semibold text-white shadow-[0_14px_32px_rgba(22,163,74,0.22)] transition hover:bg-[#087a36] disabled:cursor-not-allowed disabled:opacity-60"
+        className="inline-flex h-12 items-center justify-center rounded-[14px] bg-[#16a34a] px-5 text-sm font-semibold text-white shadow-[0_14px_32px_rgba(22,163,74,0.22)] transition hover:bg-[#087a36] disabled:cursor-not-allowed disabled:opacity-60"
         disabled={!canContinue || isSaving}
         onClick={onApprove}
         type="button"
@@ -452,16 +453,7 @@ export function ReviewActions({
         <CheckCircle2 aria-hidden="true" className="mr-2 h-4 w-4" strokeWidth={2} />
         {isSaving ? "Saving..." : "Approve & Next"}
       </button>
-      <div className="flex flex-col gap-2 sm:flex-row">
-        <button
-          className="inline-flex h-11 items-center justify-center rounded-[14px] bg-white px-4 text-sm font-semibold text-[#0f172a] ring-1 ring-[#e5e7eb] transition hover:bg-[#f8fafc] disabled:cursor-not-allowed disabled:opacity-60"
-          disabled={!canContinue || isSaving}
-          onClick={onSave}
-          type="button"
-        >
-          <Save aria-hidden="true" className="mr-2 h-4 w-4" strokeWidth={2} />
-          Save Changes
-        </button>
+      <div className="grid grid-cols-2 gap-3">
         <button
           className="inline-flex h-11 items-center justify-center rounded-[14px] bg-white px-4 text-sm font-semibold text-[#64748b] ring-1 ring-[#e5e7eb] transition hover:bg-[#f8fafc] disabled:cursor-not-allowed disabled:opacity-60"
           disabled={isSaving}
@@ -471,14 +463,23 @@ export function ReviewActions({
           Skip
         </button>
         <button
-          className="inline-flex h-11 items-center justify-center rounded-[14px] bg-[#fff7ed] px-4 text-sm font-semibold text-[#c2410c] ring-1 ring-[#fed7aa] transition hover:bg-[#ffedd5] disabled:cursor-not-allowed disabled:opacity-60"
+          className="inline-flex h-11 items-center justify-center rounded-[14px] bg-white px-4 text-sm font-semibold text-[#0f172a] ring-1 ring-[#e5e7eb] transition hover:bg-[#f8fafc] disabled:cursor-not-allowed disabled:opacity-60"
           disabled={isSaving}
           onClick={onMarkNeedsReview}
           type="button"
         >
-          Mark as Needs Review
+          Needs Review
         </button>
       </div>
+      <button
+        className="inline-flex h-10 items-center justify-center rounded-[14px] bg-white px-4 text-sm font-semibold text-[#64748b] ring-1 ring-[#e5e7eb] transition hover:bg-[#f8fafc] disabled:cursor-not-allowed disabled:opacity-60"
+        disabled={!canContinue || isSaving}
+        onClick={onSave}
+        type="button"
+      >
+        <Save aria-hidden="true" className="mr-2 h-4 w-4" strokeWidth={2} />
+        Save only
+      </button>
     </div>
   );
 }
@@ -974,16 +975,24 @@ export function ProjectSystemsPanel({
 
   return (
     <section className="rounded-[24px] border border-[#e5e7eb] bg-[#f8fafc] p-4 shadow-[0_18px_50px_rgba(15,23,42,0.04)]">
-      <header className="flex flex-col gap-4 rounded-[20px] border border-[#e5e7eb] bg-white p-5 md:flex-row md:items-center md:justify-between">
+      <header className="flex flex-col gap-4 rounded-[20px] border border-[#e5e7eb] bg-white px-5 py-4 md:flex-row md:items-center md:justify-between">
         <div>
           <h2 className="text-2xl font-semibold tracking-tight text-[#07130f]">Classification Review - Optimized</h2>
           <p className="mt-1 text-sm text-slate-500">Fast review. Grouped by category. Review only what matters.</p>
         </div>
-        <div className="flex flex-wrap items-center gap-3 text-sm">
+        <div className="flex flex-wrap items-center gap-5 text-sm">
           <KeyboardShortcutsHint />
-          <span className="rounded-full bg-[#ecfdf3] px-3 py-1 font-semibold text-[#087a36] ring-1 ring-[#bbf7d0]">
-            {Math.max(0, focusedIndex + 1)} / {filteredRows.length || sourceSummary.total}
-          </span>
+          <div className="min-w-36">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs font-semibold text-[#64748b]">Progress</span>
+              <span className="text-sm font-semibold text-[#0f172a]">
+                {reviewedCount.toLocaleString()} / {sourceSummary.total.toLocaleString()}
+              </span>
+            </div>
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-[#e5e7eb]">
+              <div className="h-full rounded-full bg-[#16a34a]" style={{ width: `${reviewedPercent}%` }} />
+            </div>
+          </div>
           <button
             className="rounded-[14px] border border-[#e5e7eb] bg-white px-4 py-2 font-semibold text-[#64748b] transition hover:bg-[#f8fafc]"
             type="button"
@@ -1008,13 +1017,15 @@ export function ProjectSystemsPanel({
         </div>
       ) : null}
 
-      <div className="mt-5 grid gap-5 xl:grid-cols-[280px_minmax(0,1fr)_380px]">
+      <div className="mt-5 grid gap-2 xl:grid-cols-[250px_minmax(0,1fr)_360px]">
         <aside className="grid content-start gap-4 rounded-[22px] border border-[#e5e7eb] bg-white p-4">
-          <div className="rounded-[20px] bg-[#f8fafc] p-4">
+          <div className="rounded-[18px] bg-white p-2">
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#64748b]">Project</p>
             <h3 className="mt-2 text-lg font-semibold text-[#0f172a]">{projectName}</h3>
             <p className="mt-2 line-clamp-2 text-sm text-[#64748b]">{fileName}</p>
-            <p className="mt-3 text-sm font-semibold text-[#087a36]">{sourceSummary.total.toLocaleString()} extracted items</p>
+            <span className="mt-3 inline-flex rounded-full bg-[#f8fafc] px-3 py-1 text-sm font-semibold text-[#64748b] ring-1 ring-[#e5e7eb]">
+              Extracted: {sourceSummary.total.toLocaleString()} items
+            </span>
           </div>
 
           <div className="rounded-[20px] border border-[#e5e7eb] bg-white p-4">
@@ -1089,6 +1100,15 @@ export function ProjectSystemsPanel({
                   </button>
                 );
               })}
+            </div>
+          </div>
+          <div className="rounded-[18px] border border-[#e9d5ff] bg-[#faf5ff] p-4">
+            <div className="flex items-start gap-3">
+              <Brain aria-hidden="true" className="mt-1 h-5 w-5 text-[#7c3aed]" strokeWidth={2} />
+              <div>
+                <p className="text-sm font-semibold text-[#0f172a]">AI is learning</p>
+                <p className="mt-1 text-xs leading-5 text-[#64748b]">Your corrections improve future suggestions.</p>
+              </div>
             </div>
           </div>
         </aside>
@@ -1256,6 +1276,22 @@ export function ProjectSystemsPanel({
             totalCount={filteredRows.length}
           />
         ) : null}
+      </div>
+
+      <div className="mt-3 flex flex-col gap-3 rounded-2xl border border-[#e9d5ff] bg-white/80 px-4 py-3 text-xs font-semibold text-[#475569] shadow-[0_10px_30px_rgba(15,23,42,0.04)] md:flex-row md:items-center md:justify-between">
+        <div className="flex flex-wrap gap-5">
+          <span className="text-[#0f172a]">Tips for fast review:</span>
+          <span>Use shortcuts</span>
+          <span>Review by category</span>
+          <span>Approve similar items in bulk</span>
+          <span>Undo anytime</span>
+        </div>
+        <button
+          className="rounded-xl border border-[#e5e7eb] bg-white px-4 py-2 text-xs font-semibold text-[#475569] transition hover:bg-[#f8fafc]"
+          type="button"
+        >
+          Undo last action
+        </button>
       </div>
 
       {showSimilarReview && focusedRow ? (
