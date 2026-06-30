@@ -7,6 +7,9 @@ import {
   AlertCircle,
   Brain,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  RotateCcw,
   Save,
   Search,
   Sparkles,
@@ -46,6 +49,11 @@ type SimilarCandidate = FlatSystemRow & {
 };
 
 type SavedState = "idle" | "saving" | "saved";
+
+type UndoEntry = {
+  itemIds: string[];
+  previousDrafts: Record<string, DraftChange>;
+};
 
 type ReviewGroup = {
   key: string;
@@ -172,14 +180,50 @@ export function ConfidenceBadge({
   );
 }
 
+function SelectField({
+  label,
+  onChange,
+  options,
+  readOnly = false,
+  value,
+}: {
+  label: string;
+  onChange?: (value: string) => void;
+  options: string[];
+  readOnly?: boolean;
+  value: string | null;
+}) {
+  const normalizedValue = value || "";
+
+  return (
+    <label className="grid gap-1.5">
+      <span className="text-xs font-semibold text-[#334155]">{label}</span>
+      <select
+        className="h-10 w-full appearance-none rounded-lg border border-[#dbe3ee] bg-white bg-[linear-gradient(45deg,transparent_50%,#64748b_50%),linear-gradient(135deg,#64748b_50%,transparent_50%)] bg-[length:5px_5px,5px_5px] bg-[position:calc(100%-18px)_17px,calc(100%-13px)_17px] bg-no-repeat px-3 pr-9 text-sm font-semibold text-[#0f172a] outline-none transition focus:border-[#16a34a] focus:ring-4 focus:ring-[#dcfce7] disabled:cursor-default disabled:opacity-100"
+        disabled={readOnly}
+        onChange={(event) => onChange?.(event.currentTarget.value)}
+        value={normalizedValue}
+      >
+        {normalizedValue ? null : <option value="">Needs review</option>}
+        {normalizedValue && !options.includes(normalizedValue) ? <option value={normalizedValue}>{normalizedValue}</option> : null}
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 export function AIReason({ reason }: { reason?: string | null }) {
   return (
-    <div className="rounded-2xl border border-[#ede9fe] bg-[#faf5ff] p-4">
+    <div className="rounded-b-2xl border-x border-b border-[#e5e7eb] bg-white px-4 py-3">
       <div className="flex items-center gap-2 text-sm font-semibold text-[#6d28d9]">
-        <Brain aria-hidden="true" className="h-4 w-4" strokeWidth={2} />
-        AI reason
+        <Sparkles aria-hidden="true" className="h-4 w-4" strokeWidth={2} />
+        <span className="text-[#0f172a]">AI Reason</span>
       </div>
-      <p className="mt-2 text-sm leading-6 text-[#64748b]">
+      <p className="mt-2 pl-6 text-sm leading-6 text-[#475569]">
         {reason || "Mnelo matched this item using the available BOQ context and classification memory."}
       </p>
     </div>
@@ -194,26 +238,31 @@ export function ClassificationSuggestion({
   item: SystemBoqItem;
 }) {
   const suggestion = [
-    { label: "System", value: draft.systemName },
-    { label: "Category", value: draft.categoryName },
-    { label: "Subcategory", value: draft.subcategoryName || "Needs review" },
+    { label: "System", options: systemOptions.map((option) => option.systemName), value: draft.systemName },
+    { label: "Category", options: categoryOptionsForSystem(draft.systemName), value: draft.categoryName },
+    {
+      label: "Subcategory",
+      options:
+        draft.categoryName && draft.categoryName !== NEEDS_REVIEW_CATEGORY
+          ? getSubcategoryOptions(draft.systemName, draft.categoryName)
+          : [],
+      value: draft.subcategoryName || "Needs review",
+    },
   ];
 
   return (
-    <div className="rounded-2xl border border-[#e5e7eb] bg-[#fbfdfb] p-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#64748b]">AI suggestion</p>
-          <p className="mt-1 text-sm text-[#64748b]">{sourceLabel(item.classificationSource)} classification</p>
-        </div>
+    <div className="rounded-t-2xl border border-[#e5e7eb] bg-white p-4">
+      <div className="flex items-center justify-between gap-3">
+        <p className="inline-flex items-center gap-2 text-base font-semibold text-[#6d28d9]">
+          <Sparkles aria-hidden="true" className="h-4 w-4" strokeWidth={2} />
+          AI Suggestion
+        </p>
         <ConfidenceBadge confidence={item.confidenceScore} needsReview={item.needsReview || draft.needsReview} />
       </div>
-      <div className="mt-4 grid gap-3 md:grid-cols-3">
+      <p className="mt-1 text-xs font-semibold text-[#64748b]">{sourceLabel(item.classificationSource)} classification</p>
+      <div className="mt-4 grid gap-3">
         {suggestion.map((entry) => (
-          <div className="rounded-xl border border-[#e5e7eb] bg-white p-3" key={entry.label}>
-            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#94a3b8]">{entry.label}</p>
-            <p className="mt-2 text-sm font-semibold text-[#0f172a]">{entry.value}</p>
-          </div>
+          <SelectField key={entry.label} label={entry.label} options={entry.options} readOnly value={entry.value} />
         ))}
       </div>
     </div>
@@ -340,14 +389,12 @@ export function ClassificationEditorPanel({
   isSaving,
   onAutoSave,
   onChangeDraft,
-  recentClassifications,
   savedState,
 }: {
   draft: DraftChange;
   isSaving: boolean;
   onAutoSave: (draft: DraftChange) => void;
   onChangeDraft: (patch: Partial<DraftChange>) => void;
-  recentClassifications: DraftChange[];
   savedState: SavedState;
 }) {
   const systemNames = systemOptions.map((option) => option.systemName);
@@ -355,24 +402,16 @@ export function ClassificationEditorPanel({
   const subcategories =
     draft.categoryName && draft.categoryName !== NEEDS_REVIEW_CATEGORY ? getSubcategoryOptions(draft.systemName, draft.categoryName) : [];
 
-  function selectRecent(nextDraft: DraftChange) {
-    onChangeDraft(nextDraft);
-    onAutoSave(normalizeDraftChange(nextDraft));
-  }
-
   return (
-    <aside className="grid content-start gap-3 rounded-[20px] border border-[#e5e7eb] bg-[#fbfdfb] p-4">
+    <aside className="grid content-start gap-3 rounded-2xl border border-[#e5e7eb] bg-white p-4">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#64748b]">Classification</p>
-          <p className="mt-1 text-sm text-[#64748b]">Search, select, and continue.</p>
+          <p className="text-sm font-semibold text-[#0f172a]">Need to change something?</p>
         </div>
         <SavedStateIndicator state={isSaving ? "saving" : savedState} />
       </div>
 
-      <RecentlyUsedClassifications onSelect={selectRecent} recent={recentClassifications} />
-
-      <SearchableClassificationPicker
+      <SelectField
         label="System"
         onChange={(systemName) =>
           onChangeDraft({
@@ -383,11 +422,10 @@ export function ClassificationEditorPanel({
           })
         }
         options={systemNames}
-        placeholder="Search system..."
         value={draft.systemName}
       />
 
-      <SearchableClassificationPicker
+      <SelectField
         label="Category"
         onChange={(categoryName) =>
           onChangeDraft({
@@ -397,16 +435,15 @@ export function ClassificationEditorPanel({
           })
         }
         options={categories}
-        placeholder="Search category..."
         value={draft.categoryName === NEEDS_REVIEW_CATEGORY ? null : draft.categoryName}
       />
 
       {draft.categoryName === NEEDS_REVIEW_CATEGORY ? (
-        <div className="rounded-2xl border border-dashed border-[#cbd5e1] bg-white p-4 text-sm leading-6 text-[#64748b]">
+        <div className="rounded-xl border border-dashed border-[#cbd5e1] bg-[#f8fafc] p-3 text-sm leading-6 text-[#64748b]">
           Choose a category to show matching subcategories. Mnelo will not select the first option automatically.
         </div>
       ) : (
-        <SearchableClassificationPicker
+        <SelectField
           label="Subcategory"
           onChange={(subcategoryName) => {
             const nextDraft = normalizeDraftChange({
@@ -419,12 +456,9 @@ export function ClassificationEditorPanel({
             onAutoSave(nextDraft);
           }}
           options={subcategories}
-          placeholder="Search subcategory..."
           value={draft.subcategoryName}
         />
       )}
-
-      <KeyboardShortcutsHint />
     </aside>
   );
 }
@@ -490,6 +524,7 @@ export function ClassificationReview({
   currentIndex,
   draft,
   item,
+  canUndo,
   onApprove,
   onAutoSave,
   onChangeDraft,
@@ -499,15 +534,18 @@ export function ClassificationReview({
   onSave,
   onSelectSimilar,
   onSkip,
-  recentClassifications,
+  onUndo,
   savedState,
   similarCount,
   totalCount,
   isSaving,
+  isUndoing,
 }: {
+  canUndo: boolean;
   currentIndex: number;
   draft: DraftChange;
   isSaving: boolean;
+  isUndoing: boolean;
   item: SystemBoqItem;
   onApprove: () => void;
   onAutoSave: (draft: DraftChange) => void;
@@ -518,7 +556,7 @@ export function ClassificationReview({
   onSave: () => void;
   onSelectSimilar: () => void;
   onSkip: () => void;
-  recentClassifications: DraftChange[];
+  onUndo: () => void;
   savedState: SavedState;
   similarCount: number;
   totalCount: number;
@@ -526,71 +564,69 @@ export function ClassificationReview({
   const canSave = Boolean(draft.systemName && draft.categoryName && (draft.needsReview || draft.subcategoryName));
 
   return (
-    <aside className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto rounded-[24px] border border-[#e5e7eb] bg-white p-5 shadow-[0_18px_50px_rgba(15,23,42,0.05)]">
-      <div className="flex items-center justify-between gap-3">
+    <aside className="flex h-full min-h-0 flex-col overflow-hidden rounded-[24px] border border-[#e5e7eb] bg-white shadow-[0_18px_50px_rgba(15,23,42,0.05)]">
+      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[#e5e7eb] px-4 py-3">
         <button
-          className="rounded-full border border-[#e5e7eb] bg-white px-3 py-1.5 text-sm font-semibold text-[#64748b] transition hover:bg-[#f8fafc]"
+          className="grid h-10 w-10 place-items-center rounded-lg border border-[#e5e7eb] bg-white text-[#334155] transition hover:bg-[#f8fafc]"
           onClick={onPrevious}
           type="button"
+          aria-label="Previous item"
         >
-          Previous
+          <ChevronLeft aria-hidden="true" className="h-4 w-4" strokeWidth={2} />
         </button>
-        <p className="text-sm font-semibold text-[#0f172a]">
+        <p className="text-base font-semibold text-[#0f172a]">
           Item {currentIndex + 1} of {totalCount}
         </p>
         <button
-          className="rounded-full border border-[#e5e7eb] bg-white px-3 py-1.5 text-sm font-semibold text-[#64748b] transition hover:bg-[#f8fafc]"
+          className="grid h-10 w-10 place-items-center rounded-lg border border-[#e5e7eb] bg-white text-[#334155] transition hover:bg-[#f8fafc]"
           onClick={onNext}
           type="button"
+          aria-label="Next item"
         >
-          Next
+          <ChevronRight aria-hidden="true" className="h-4 w-4" strokeWidth={2} />
         </button>
       </div>
 
-      <ClassificationSuggestion draft={draft} item={item} />
-      <AIReason reason={item.classificationReason} />
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+        <ClassificationSuggestion draft={draft} item={item} />
+        <AIReason reason={item.classificationReason} />
 
-      <ClassificationEditorPanel
-        draft={draft}
-        isSaving={isSaving}
-        onAutoSave={onAutoSave}
-        onChangeDraft={onChangeDraft}
-        recentClassifications={recentClassifications}
-        savedState={savedState}
-      />
+        <div className="mt-3">
+          <ClassificationEditorPanel
+            draft={draft}
+            isSaving={isSaving}
+            onAutoSave={onAutoSave}
+            onChangeDraft={onChangeDraft}
+            savedState={savedState}
+          />
+        </div>
 
-      <div className="rounded-2xl border border-[#e5e7eb] bg-[#fbfdfb] p-4">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-sm font-semibold text-[#0f172a]">Similar items ({similarCount})</p>
-            <p className="mt-1 text-sm text-[#64748b]">AI found {similarCount} possible similar items.</p>
+        <div className="mt-3 rounded-2xl border border-[#e5e7eb] bg-white p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-base font-semibold text-[#0f172a]">Similar items ({similarCount})</p>
+              <p className="mt-3 text-sm text-[#64748b]">AI found {similarCount} possible similar items.</p>
+            </div>
+            <button
+              className="inline-flex h-10 items-center justify-center rounded-lg bg-white px-3 text-sm font-semibold text-[#0f172a] ring-1 ring-[#e5e7eb] transition hover:bg-[#f8fafc] disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={similarCount === 0}
+              onClick={onSelectSimilar}
+              type="button"
+            >
+              <Sparkles aria-hidden="true" className="mr-2 h-4 w-4 text-[#6d28d9]" strokeWidth={2} />
+              Preview
+            </button>
           </div>
-          <button
-            className="rounded-[14px] bg-[#f5f3ff] px-3 py-2 text-sm font-semibold text-[#6d28d9] ring-1 ring-[#ddd6fe] transition hover:bg-[#ede9fe] disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={similarCount === 0}
-            onClick={onSelectSimilar}
-            type="button"
-          >
-            Preview
-          </button>
         </div>
+
+        {draft.needsReview ? (
+          <div className="mt-3 rounded-2xl border border-[#fed7aa] bg-[#fff7ed] p-4 text-sm font-semibold text-[#c2410c]">
+            This item will stay in review until a final category is confirmed.
+          </div>
+        ) : null}
       </div>
 
-      <div className="rounded-2xl bg-white p-4 ring-1 ring-[#e5e7eb]">
-        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#64748b]">Current item</p>
-        <p className="mt-2 text-sm font-semibold text-[#0f172a]">
-          {(item.takeoffQuantity ?? item.quantity ?? 0).toLocaleString()} {item.takeoffUnit || item.unit || "item"}
-        </p>
-        <p className="mt-1 text-sm text-[#64748b]">{item.amount === null ? "No amount extracted" : `${item.amount.toLocaleString()} total`}</p>
-      </div>
-
-      {draft.needsReview ? (
-        <div className="rounded-2xl border border-[#fed7aa] bg-[#fff7ed] p-4 text-sm font-semibold text-[#c2410c]">
-          This item will stay in review until a final category is confirmed.
-        </div>
-      ) : null}
-
-      <div className="sticky bottom-0 mt-auto bg-white pt-1">
+      <div className="shrink-0 border-t border-[#e5e7eb] bg-white p-4">
         <ReviewActions
           canContinue={canSave}
           isSaving={isSaving}
@@ -599,6 +635,15 @@ export function ClassificationReview({
           onSave={onSave}
           onSkip={onSkip}
         />
+        <button
+          className="mt-3 inline-flex h-11 w-full items-center justify-center rounded-[14px] bg-white px-4 text-sm font-semibold text-[#334155] ring-1 ring-[#e5e7eb] transition hover:bg-[#f8fafc] disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={!canUndo || isSaving || isUndoing}
+          onClick={onUndo}
+          type="button"
+        >
+          <RotateCcw aria-hidden="true" className="mr-2 h-4 w-4 text-[#6d28d9]" strokeWidth={2} />
+          {isUndoing ? "Undoing..." : "Undo last action"}
+        </button>
       </div>
     </aside>
   );
@@ -620,10 +665,12 @@ export function ProjectSystemsPanel({
   const [isClassifying, setIsClassifying] = useState(false);
   const [isSavingBulk, setIsSavingBulk] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isUndoing, setIsUndoing] = useState(false);
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, DraftChange>>({});
   const [selectedSimilarIds, setSelectedSimilarIds] = useState<string[]>([]);
   const [savedOverrides, setSavedOverrides] = useState<Record<string, DraftChange>>({});
+  const [undoStack, setUndoStack] = useState<UndoEntry[]>([]);
   const [recentClassifications, setRecentClassifications] = useState<DraftChange[]>([]);
   const [savedState, setSavedState] = useState<SavedState>("idle");
   const [showSimilarReview, setShowSimilarReview] = useState(false);
@@ -736,6 +783,10 @@ export function ProjectSystemsPanel({
     return drafts[row.item.id] || savedOverrides[row.item.id] || draftForItem(row.item, row.system.name, row.category.name);
   }
 
+  function persistedDraft(row: FlatSystemRow) {
+    return savedOverrides[row.item.id] || draftForItem(row.item, row.system.name, row.category.name);
+  }
+
   function updateDraft(itemId: string, patch: Partial<DraftChange>) {
     const row = originalById.get(itemId);
 
@@ -778,11 +829,21 @@ export function ProjectSystemsPanel({
     });
   }
 
-  async function saveDrafts(itemIds: string[], successMessage: string, continueAfterSave = false, forcedDraft?: DraftChange) {
+  async function saveDrafts(
+    itemIds: string[],
+    successMessage: string,
+    continueAfterSave = false,
+    forcedDraft?: DraftChange,
+    options: {
+      draftByItemId?: Record<string, DraftChange>;
+      trackUndo?: boolean;
+    } = {},
+  ) {
+    const trackUndo = options.trackUndo !== false;
     const changes = itemIds
       .map((itemId) => {
         const row = originalById.get(itemId);
-        const draft = forcedDraft || (row ? displayDraft(row) : drafts[itemId]);
+        const draft = options.draftByItemId?.[itemId] || forcedDraft || (row ? displayDraft(row) : drafts[itemId]);
 
         if (!draft) {
           return null;
@@ -799,8 +860,18 @@ export function ProjectSystemsPanel({
       .filter((change): change is NonNullable<typeof change> => Boolean(change));
 
     if (changes.length === 0 || isSaving) {
-      return;
+      return false;
     }
+
+    const previousDrafts = changes.reduce((previous, change) => {
+      const row = originalById.get(change.itemId);
+
+      if (row) {
+        previous[change.itemId] = persistedDraft(row);
+      }
+
+      return previous;
+    }, {} as Record<string, DraftChange>);
 
     setIsSaving(true);
     setNotice(null);
@@ -817,7 +888,7 @@ export function ProjectSystemsPanel({
         console.error(message);
         setNotice({ tone: "error", message });
         setSavedState("idle");
-        return;
+        return false;
       }
 
       const savedDrafts = changes.reduce(
@@ -834,6 +905,9 @@ export function ProjectSystemsPanel({
       );
 
       setSavedOverrides((previous) => ({ ...previous, ...savedDrafts }));
+      if (trackUndo && Object.keys(previousDrafts).length > 0) {
+        setUndoStack((previous) => [...previous, { itemIds: changes.map((change) => change.itemId), previousDrafts }].slice(-10));
+      }
       changes.forEach((change) =>
         rememberClassification({
           categoryName: change.categoryName,
@@ -849,6 +923,8 @@ export function ProjectSystemsPanel({
       if (continueAfterSave && itemIds[0]) {
         setActiveItemId(nextRowAfter(itemIds[0])?.item.id || null);
       }
+
+      return true;
     } catch (error) {
       console.error(error);
       setSavedState("idle");
@@ -856,8 +932,31 @@ export function ProjectSystemsPanel({
         tone: "error",
         message: error instanceof Error ? error.message : "Unknown classification error.",
       });
+      return false;
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  async function undoLastAction() {
+    const lastAction = undoStack.at(-1);
+
+    if (!lastAction || isSaving || isUndoing) {
+      return;
+    }
+
+    setIsUndoing(true);
+    try {
+      const ok = await saveDrafts(lastAction.itemIds, "Undo applied. Previous classification restored.", false, undefined, {
+        draftByItemId: lastAction.previousDrafts,
+        trackUndo: false,
+      });
+
+      if (ok) {
+        setUndoStack((previous) => previous.slice(0, -1));
+      }
+    } finally {
+      setIsUndoing(false);
     }
   }
 
@@ -1260,8 +1359,10 @@ export function ProjectSystemsPanel({
 
         {focusedRow ? (
           <ClassificationReview
+            canUndo={undoStack.length > 0}
             currentIndex={Math.max(0, focusedIndex)}
             draft={displayDraft(focusedRow)}
+            isUndoing={isUndoing}
             isSaving={isSaving}
             item={focusedRow.item}
             onApprove={approveFocusedRow}
@@ -1280,7 +1381,7 @@ export function ProjectSystemsPanel({
               setShowSimilarReview(true);
             }}
             onSkip={skipFocusedRow}
-            recentClassifications={recentClassifications}
+            onUndo={() => void undoLastAction()}
             savedState={savedState}
             similarCount={similarCandidates.length}
             totalCount={filteredRows.length}
@@ -1297,10 +1398,12 @@ export function ProjectSystemsPanel({
           <span>Undo anytime</span>
         </div>
         <button
-          className="rounded-xl border border-[#e5e7eb] bg-white px-4 py-2 text-xs font-semibold text-[#475569] transition hover:bg-[#f8fafc]"
+          className="rounded-xl border border-[#e5e7eb] bg-white px-4 py-2 text-xs font-semibold text-[#475569] transition hover:bg-[#f8fafc] disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={undoStack.length === 0 || isSaving || isUndoing}
+          onClick={() => void undoLastAction()}
           type="button"
         >
-          Undo last action
+          {isUndoing ? "Undoing..." : "Undo last action"}
         </button>
       </div>
 
