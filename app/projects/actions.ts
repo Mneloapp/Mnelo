@@ -983,11 +983,26 @@ async function persistClassificationLearningMemory({
   records: Array<ReturnType<typeof manualClassificationMemoryPayload>>;
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
 }) {
-  const learningRecords = records
+  const rawLearningRecords = records
     .map(classificationLearningMemoryPayload)
     .filter((record) => record.normalized_description && record.system && record.category && record.subcategory);
+  const learningRecordsByConflictKey = new Map<string, (typeof rawLearningRecords)[number]>();
 
-  if (learningRecords.length === 0) {
+  for (const record of rawLearningRecords) {
+    const conflictKey = [
+      record.organization_id,
+      record.normalized_description,
+      record.system,
+      record.category,
+      record.subcategory,
+    ].join("::");
+
+    learningRecordsByConflictKey.set(conflictKey, record);
+  }
+
+  const learningRecords = Array.from(learningRecordsByConflictKey.values());
+
+  if (rawLearningRecords.length === 0) {
     return { error: null, requested: 0, savedCount: 0 };
   }
 
@@ -1000,7 +1015,7 @@ async function persistClassificationLearningMemory({
   if (!batchResult.error) {
     debugClassificationMemoryTrace("save-learning-memory", {
       insertedOrUpdated: learningRecords.length,
-      requested: learningRecords.length,
+      requested: rawLearningRecords.length,
       sample: learningRecords[0]
         ? {
             category: learningRecords[0].classification_category,
@@ -1012,7 +1027,7 @@ async function persistClassificationLearningMemory({
         : null,
     });
 
-    return { error: null, requested: learningRecords.length, savedCount: learningRecords.length };
+    return { error: null, requested: rawLearningRecords.length, savedCount: learningRecords.length };
   }
 
   const canFallback =
@@ -1025,7 +1040,7 @@ async function persistClassificationLearningMemory({
   if (!canFallback) {
     return {
       error: `Failed saving classification learning memory: ${batchResult.error.message}`,
-      requested: learningRecords.length,
+      requested: rawLearningRecords.length,
       savedCount: 0,
     };
   }
@@ -1079,12 +1094,12 @@ async function persistClassificationLearningMemory({
   if (savedCount !== learningRecords.length) {
     return {
       error: firstError || `Saved ${savedCount} of ${learningRecords.length} classification learning memory records.`,
-      requested: learningRecords.length,
+      requested: rawLearningRecords.length,
       savedCount,
     };
   }
 
-  return { error: null, requested: learningRecords.length, savedCount };
+  return { error: null, requested: rawLearningRecords.length, savedCount };
 }
 
 async function getClassificationLearningMemoryForUser({
