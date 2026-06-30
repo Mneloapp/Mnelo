@@ -467,27 +467,33 @@ export function ReviewActions({
   canContinue,
   isSaving,
   onApprove,
+  onApplyToSelected,
   onMarkNeedsReview,
   onSave,
   onSkip,
+  selectedCount,
 }: {
   canContinue: boolean;
   isSaving: boolean;
   onApprove: () => void;
+  onApplyToSelected: () => void;
   onMarkNeedsReview: () => void;
   onSave: () => void;
   onSkip: () => void;
+  selectedCount: number;
 }) {
+  const isBulkMode = selectedCount > 0;
+
   return (
     <div className="grid gap-3 border-t border-[#e5e7eb] pt-4">
       <button
         className="inline-flex h-12 items-center justify-center rounded-[14px] bg-[#16a34a] px-5 text-sm font-semibold text-white shadow-[0_14px_32px_rgba(22,163,74,0.22)] transition hover:bg-[#087a36] disabled:cursor-not-allowed disabled:opacity-60"
         disabled={!canContinue || isSaving}
-        onClick={onApprove}
+        onClick={isBulkMode ? onApplyToSelected : onApprove}
         type="button"
       >
         <CheckCircle2 aria-hidden="true" className="mr-2 h-4 w-4" strokeWidth={2} />
-        {isSaving ? "Saving..." : "Approve & Next"}
+        {isSaving ? "Saving..." : isBulkMode ? `Apply to ${selectedCount.toLocaleString()} selected` : "Approve & Next"}
       </button>
       <div className="grid grid-cols-2 gap-3">
         <button
@@ -509,7 +515,7 @@ export function ReviewActions({
       </div>
       <button
         className="inline-flex h-10 items-center justify-center rounded-[14px] bg-white px-4 text-sm font-semibold text-[#64748b] ring-1 ring-[#e5e7eb] transition hover:bg-[#f8fafc] disabled:cursor-not-allowed disabled:opacity-60"
-        disabled={!canContinue || isSaving}
+        disabled={!canContinue || isSaving || isBulkMode}
         onClick={onSave}
         type="button"
       >
@@ -635,16 +641,8 @@ export function ClassificationReview({
               {selectedCount.toLocaleString()} selected item{selectedCount === 1 ? "" : "s"}
             </p>
             <p className="mt-1 text-sm leading-6 text-[#166534]">
-              Apply the current system, category, and subcategory to every selected row in one save.
+              Choose the classification above, then use the green action button below to save every selected row together.
             </p>
-            <button
-              className="mt-3 inline-flex h-11 w-full items-center justify-center rounded-[14px] bg-[#16a34a] px-4 text-sm font-semibold text-white shadow-[0_12px_28px_rgba(22,163,74,0.18)] transition hover:bg-[#087a36] disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={!canSave || isSaving}
-              onClick={onApplyToSelected}
-              type="button"
-            >
-              {isSaving ? "Saving..." : `Apply to ${selectedCount.toLocaleString()} selected`}
-            </button>
           </div>
         ) : null}
       </div>
@@ -654,9 +652,11 @@ export function ClassificationReview({
           canContinue={canSave}
           isSaving={isSaving}
           onApprove={onApprove}
+          onApplyToSelected={onApplyToSelected}
           onMarkNeedsReview={onMarkNeedsReview}
           onSave={onSave}
           onSkip={onSkip}
+          selectedCount={selectedCount}
         />
         <button
           className="mt-3 inline-flex h-11 w-full items-center justify-center rounded-[14px] bg-white px-4 text-sm font-semibold text-[#334155] ring-1 ring-[#e5e7eb] transition hover:bg-[#f8fafc] disabled:cursor-not-allowed disabled:opacity-50"
@@ -1032,7 +1032,7 @@ export function ProjectSystemsPanel({
   }
 
   function autoSaveFocusedRow(nextDraft: DraftChange) {
-    if (!focusedRow || !hasCompleteDraftClassification(nextDraft)) {
+    if (!focusedRow || batchSelectedIds.length > 0 || !hasCompleteDraftClassification(nextDraft)) {
       return;
     }
 
