@@ -3104,6 +3104,7 @@ export async function correctBoqItemSystemClassification(formData: FormData) {
 
     revalidatePath(`/projects/${projectId}`);
     revalidatePath(`/projects/${projectId}/intelligence`);
+    revalidatePath(`/projects/${projectId}/manual-review`);
     revalidatePath("/boq");
     revalidatePath("/learning");
 
