@@ -525,7 +525,9 @@ export function ClassificationReview({
   draft,
   item,
   canUndo,
+  selectedCount,
   onApprove,
+  onApplyToSelected,
   onAutoSave,
   onChangeDraft,
   onMarkNeedsReview,
@@ -547,7 +549,9 @@ export function ClassificationReview({
   isSaving: boolean;
   isUndoing: boolean;
   item: SystemBoqItem;
+  selectedCount: number;
   onApprove: () => void;
+  onApplyToSelected: () => void;
   onAutoSave: (draft: DraftChange) => void;
   onChangeDraft: (patch: Partial<DraftChange>) => void;
   onMarkNeedsReview: () => void;
@@ -622,6 +626,25 @@ export function ClassificationReview({
         {draft.needsReview ? (
           <div className="mt-3 rounded-2xl border border-[#fed7aa] bg-[#fff7ed] p-4 text-sm font-semibold text-[#c2410c]">
             This item will stay in review until a final category is confirmed.
+          </div>
+        ) : null}
+
+        {selectedCount > 0 ? (
+          <div className="mt-3 rounded-2xl border border-[#bbf7d0] bg-[#ecfdf3] p-4">
+            <p className="text-sm font-semibold text-[#087a36]">
+              {selectedCount.toLocaleString()} selected item{selectedCount === 1 ? "" : "s"}
+            </p>
+            <p className="mt-1 text-sm leading-6 text-[#166534]">
+              Apply the current system, category, and subcategory to every selected row in one save.
+            </p>
+            <button
+              className="mt-3 inline-flex h-11 w-full items-center justify-center rounded-[14px] bg-[#16a34a] px-4 text-sm font-semibold text-white shadow-[0_12px_28px_rgba(22,163,74,0.18)] transition hover:bg-[#087a36] disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={!canSave || isSaving}
+              onClick={onApplyToSelected}
+              type="button"
+            >
+              {isSaving ? "Saving..." : `Apply to ${selectedCount.toLocaleString()} selected`}
+            </button>
           </div>
         ) : null}
       </div>
@@ -1016,6 +1039,24 @@ export function ProjectSystemsPanel({
     void saveDrafts([focusedRow.item.id], "Saved", false, nextDraft);
   }
 
+  async function applyFocusedClassificationToSelected() {
+    if (!focusedRow || batchSelectedIds.length === 0 || isSaving) {
+      return;
+    }
+
+    const draft = normalizeDraftChange(displayDraft(focusedRow));
+    const ok = await saveDrafts(
+      batchSelectedIds,
+      `Classification saved for ${batchSelectedIds.length.toLocaleString()} selected item${batchSelectedIds.length === 1 ? "" : "s"}.`,
+      false,
+      draft,
+    );
+
+    if (ok) {
+      setBatchSelectedIds([]);
+    }
+  }
+
   useEffect(() => {
     function isEditableTarget(target: EventTarget | null) {
       return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement;
@@ -1339,20 +1380,10 @@ export function ProjectSystemsPanel({
             <button
               className="rounded-[14px] bg-[#16a34a] px-4 py-2 text-sm font-semibold text-white shadow-[0_12px_28px_rgba(22,163,74,0.18)] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500 disabled:shadow-none"
               disabled={batchSelectedIds.length === 0 || !focusedRow}
-              onClick={() => {
-                if (!focusedRow) return;
-                const draft = displayDraft(focusedRow);
-                void saveDrafts(
-                  batchSelectedIds,
-                  `Classification saved for ${batchSelectedIds.length.toLocaleString()} selected item${batchSelectedIds.length === 1 ? "" : "s"}.`,
-                  false,
-                  draft,
-                );
-                setBatchSelectedIds([]);
-              }}
+              onClick={() => void applyFocusedClassificationToSelected()}
               type="button"
             >
-              Preview changes
+              Apply current classification
             </button>
           </div>
         </main>
@@ -1365,7 +1396,9 @@ export function ProjectSystemsPanel({
             isUndoing={isUndoing}
             isSaving={isSaving}
             item={focusedRow.item}
+            selectedCount={batchSelectedIds.length}
             onApprove={approveFocusedRow}
+            onApplyToSelected={() => void applyFocusedClassificationToSelected()}
             onAutoSave={autoSaveFocusedRow}
             onChangeDraft={(patch) => updateDraft(focusedRow.item.id, patch)}
             onMarkNeedsReview={markFocusedNeedsReview}
