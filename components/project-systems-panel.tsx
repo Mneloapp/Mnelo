@@ -21,6 +21,7 @@ import {
   getSystemRuleOptions,
   NEEDS_REVIEW_CATEGORY,
   NEEDS_REVIEW_SYSTEM,
+  sanitizeClassificationLabel,
 } from "@/lib/classification";
 import { getSimilarItemMatch, type SimilarItemMatch } from "@/lib/classification/similar-items";
 import type { ProjectSystemCategory, ProjectSystemSummary, SystemBoqItem } from "@/lib/data";
@@ -107,11 +108,14 @@ function draftForItem(item: SystemBoqItem, systemName: string, categoryName: str
 }
 
 function displaySubcategory(item: SystemBoqItem) {
-  if (item.classificationSubcategory) {
-    return item.classificationSubcategory;
-  }
-
-  return item.inheritedSubcategory || item.subcategory || item.sectionHeader || item.category || "Unclassified";
+  return (
+    sanitizeClassificationLabel(item.classificationSubcategory) ||
+    sanitizeClassificationLabel(item.inheritedSubcategory) ||
+    sanitizeClassificationLabel(item.subcategory) ||
+    sanitizeClassificationLabel(item.sectionHeader) ||
+    sanitizeClassificationLabel(item.category) ||
+    "Unclassified"
+  );
 }
 
 function groupNameForRow(row: FlatSystemRow) {

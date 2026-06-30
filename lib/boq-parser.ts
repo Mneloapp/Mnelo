@@ -1,6 +1,6 @@
 import * as XLSX from "xlsx";
 import { cleanupBoqRow, type BoqRowType } from "@/lib/boq-cleanup";
-import { inferClassificationFromExcelContext, NEEDS_REVIEW_SYSTEM } from "@/lib/classification";
+import { inferClassificationFromExcelContext, NEEDS_REVIEW_SYSTEM, sanitizeClassificationLabel } from "@/lib/classification";
 
 const descriptionHeaders = [
   "description",
@@ -293,9 +293,14 @@ function looksLikeSectionHeader({
 
   const visualHeader = rowHasMerge(sheet, rowIndex) || rowHasColoredFill(sheet, rowIndex, maxColumns) || rowHasBoldText(sheet, rowIndex, maxColumns);
   const compactHeader = text.length <= 90 && filledCells <= 3;
-  const knownHeader = inferClassificationFromExcelContext(null, text);
+  const sectionContext = sanitizeClassificationLabel(text);
+  const knownHeader = sectionContext ? inferClassificationFromExcelContext(null, sectionContext) : null;
 
   return visualHeader || compactHeader || Boolean(knownHeader && knownHeader.systemName !== NEEDS_REVIEW_SYSTEM);
+}
+
+function sectionHeaderContext(value: string) {
+  return sanitizeClassificationLabel(value);
 }
 
 function buildParsedBoqRow({
@@ -520,7 +525,29 @@ export async function parseBoqWorkbook(source: Blob, mapping?: ColumnMapping | n
         const fullRowText = rowText(row);
 
         if (fullRowText && looksLikeSectionHeader({ amount, description: fullRowText, maxColumns, quantity, rate, row, rowIndex, sheet, unit })) {
-          currentSectionHeader = fullRowText;
+          const contextHeader = sectionHeaderContext(fullRowText);
+
+          if (!contextHeader) {
+            parsedRows.push({
+              amount: null,
+              cleanup_reason: "Numeric/helper section row ignored as classification context.",
+              description: fullRowText,
+              inherited_category: null,
+              inherited_subcategory: null,
+              quantity: null,
+              rate: null,
+              row_number: rowIndex + 1,
+              row_type: "ignored",
+              section_header: null,
+              sheet_name: sheetName,
+              source_row_number: rowIndex + 1,
+              source_sheet_name: sheetName,
+              unit: null,
+            });
+            continue;
+          }
+
+          currentSectionHeader = contextHeader;
           parsedRows.push({
             amount: null,
             cleanup_reason: "Section header used as inherited classification context.",
@@ -575,7 +602,29 @@ export async function parseBoqWorkbook(source: Blob, mapping?: ColumnMapping | n
       const fullRowText = rowText(row);
 
       if (fullRowText && looksLikeSectionHeader({ amount, description: fullRowText, maxColumns, quantity, rate, row, rowIndex, sheet, unit })) {
-        currentSectionHeader = fullRowText;
+        const contextHeader = sectionHeaderContext(fullRowText);
+
+        if (!contextHeader) {
+          parsedRows.push({
+            amount: null,
+            cleanup_reason: "Numeric/helper section row ignored as classification context.",
+            description: fullRowText,
+            inherited_category: null,
+            inherited_subcategory: null,
+            quantity: null,
+            rate: null,
+            row_number: rowIndex + 1,
+            row_type: "ignored",
+            section_header: null,
+            sheet_name: sheetName,
+            source_row_number: rowIndex + 1,
+            source_sheet_name: sheetName,
+            unit: null,
+          });
+          continue;
+        }
+
+        currentSectionHeader = contextHeader;
         parsedRows.push({
           amount: null,
           cleanup_reason: "Section header used as inherited classification context.",

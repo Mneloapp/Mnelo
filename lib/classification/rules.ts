@@ -1,3 +1,5 @@
+import { sanitizeClassificationLabel } from "./normalize";
+
 export type ClassificationSource = "ai" | "inherited_header" | "learned" | "needs_review" | "rules" | "user";
 
 export type SystemClassification = {
@@ -676,7 +678,7 @@ export function inferSystemFromSheetName(sheetName?: string | null) {
 
 export function inferClassificationFromExcelContext(sheetName?: string | null, sectionHeader?: string | null): SystemClassification | null {
   const inferredSystem = inferSystemFromSheetName(sheetName);
-  const sectionText = sectionHeader || "";
+  const sectionText = sanitizeClassificationLabel(sectionHeader) || "";
   const contextualMatch =
     inferredSystem && sectionText
       ? contextualSectionAliases.find(

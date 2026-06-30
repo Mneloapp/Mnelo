@@ -4,6 +4,7 @@ import {
   NEEDS_REVIEW_CATEGORY,
   NEEDS_REVIEW_SYSTEM,
   normalizeTakeoffUnit,
+  sanitizeClassificationLabel,
 } from "@/lib/classification";
 import { normalizeParsedBoqRows, parseBoqWorkbook } from "@/lib/boq-parser";
 import type { BoqRowType } from "@/lib/boq-cleanup";
@@ -763,11 +764,15 @@ function applyStorageExcelContext(rows: BoqItemRow[], context: Awaited<ReturnTyp
 }
 
 function firstMeaningfulValue(...values: Array<null | string | undefined>) {
-  return values.find((value) => {
-    const normalized = value?.trim();
+  for (const value of values) {
+    const normalized = sanitizeClassificationLabel(value);
 
-    return Boolean(normalized && normalized !== "General" && normalized !== "Unclassified" && normalized !== NEEDS_REVIEW_CATEGORY);
-  });
+    if (normalized && normalized !== NEEDS_REVIEW_CATEGORY) {
+      return normalized;
+    }
+  }
+
+  return undefined;
 }
 
 function isStrongClassificationResult(
