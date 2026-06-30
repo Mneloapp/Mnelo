@@ -991,6 +991,45 @@ async function persistClassificationLearningMemory({
     return { error: null, requested: 0, savedCount: 0 };
   }
 
+  const batchResult = await supabase
+    .from("classification_learning_memory")
+    .upsert(learningRecords, {
+      onConflict: "organization_id,normalized_description,system,category,subcategory",
+    });
+
+  if (!batchResult.error) {
+    debugClassificationMemoryTrace("save-learning-memory", {
+      insertedOrUpdated: learningRecords.length,
+      requested: learningRecords.length,
+      sample: learningRecords[0]
+        ? {
+            category: learningRecords[0].classification_category,
+            normalizedDescription: learningRecords[0].normalized_description,
+            source: learningRecords[0].source,
+            subcategory: learningRecords[0].classification_subcategory,
+            system: learningRecords[0].classification_system,
+          }
+        : null,
+    });
+
+    return { error: null, requested: learningRecords.length, savedCount: learningRecords.length };
+  }
+
+  const canFallback =
+    batchResult.error.message.includes("schema cache") ||
+    batchResult.error.message.includes("classification_learning_memory_org_description_idx") ||
+    batchResult.error.message.includes("unique") ||
+    batchResult.error.message.includes("constraint") ||
+    batchResult.error.message.includes("on conflict");
+
+  if (!canFallback) {
+    return {
+      error: `Failed saving classification learning memory: ${batchResult.error.message}`,
+      requested: learningRecords.length,
+      savedCount: 0,
+    };
+  }
+
   let savedCount = 0;
   let firstError: string | null = null;
 
@@ -2671,6 +2710,124 @@ async function updateBoqItemClassification({
   return lastError || "Unable to update BOQ item classification.";
 }
 
+async function bulkUpdateBoqItemsClassification({
+  categoryId,
+  classification,
+  itemIds,
+  needsReviewOverride,
+  projectId,
+  supabase,
+  systemId,
+  userId,
+}: {
+  categoryId?: string;
+  classification: SystemClassification;
+  itemIds: string[];
+  needsReviewOverride?: boolean;
+  projectId: string;
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+  systemId?: string;
+  userId: string;
+}) {
+  if (itemIds.length === 0) {
+    return { error: null, updatedCount: 0 };
+  }
+
+  const classificationSource =
+    classification.source || (classification.systemName === NEEDS_REVIEW_SYSTEM ? "needs_review" : "rules");
+  const isUserCorrection = classificationSource === "user" || classificationSource === "learned";
+  const hasCompleteClassification = Boolean(
+    classification.systemName !== NEEDS_REVIEW_SYSTEM &&
+      classification.categoryName !== NEEDS_REVIEW_CATEGORY &&
+      classification.subcategoryName &&
+      isValidSystem(classification.systemName) &&
+      isValidCategory(classification.systemName, classification.categoryName) &&
+      isValidSubcategory(classification.systemName, classification.categoryName, classification.subcategoryName),
+  );
+  const needsReview =
+    isUserCorrection && hasCompleteClassification
+      ? false
+      : (needsReviewOverride ??
+        (classification.systemName === NEEDS_REVIEW_SYSTEM ||
+          classification.categoryName === NEEDS_REVIEW_CATEGORY ||
+          !classification.subcategoryName ||
+          classification.confidenceScore < 0.7 ||
+          classificationSource === "needs_review"));
+  const basePayload = {
+    category: classification.systemName,
+    classification_category: classification.categoryName,
+    classification_system: classification.systemName,
+    classification_subcategory: classification.subcategoryName || null,
+    confidence_score: classification.confidenceScore,
+    subcategory: classification.categoryName,
+    user_corrected: isUserCorrection,
+  };
+  const updateAttempts: Array<Record<string, unknown>> = [
+    {
+      ...basePayload,
+      classification_confidence: classification.confidenceScore,
+      classification_reason: classification.reason || null,
+      classification_source: classificationSource,
+      classification_status: needsReview ? "needs_review" : "classified",
+      needs_review: needsReview,
+      system_category_id: categoryId || null,
+      system_id: systemId || null,
+      updated_at: new Date().toISOString(),
+    },
+    {
+      ...basePayload,
+      classification_confidence: classification.confidenceScore,
+      classification_reason: classification.reason || null,
+      classification_source: classificationSource,
+      needs_review: needsReview,
+    },
+    {
+      ...basePayload,
+      classification_reason: classification.reason || null,
+      classification_source: classificationSource,
+      needs_review: needsReview,
+    },
+  ];
+  let lastError: string | null = null;
+
+  for (const payload of updateAttempts) {
+    const { data, error } = await supabase
+      .from("boq_items")
+      .update(payload)
+      .eq("project_id", projectId)
+      .eq("user_id", userId)
+      .in("id", itemIds)
+      .select("id");
+
+    if (!error) {
+      return { error: null, updatedCount: data?.length ?? itemIds.length };
+    }
+
+    lastError = error.message;
+    const canRetrySchemaFallback =
+      error.message.includes("schema cache") ||
+      error.message.includes("classification_confidence") ||
+      error.message.includes("classification_status") ||
+      error.message.includes("system_category_id") ||
+      error.message.includes("system_id") ||
+      error.message.includes("classification_subcategory") ||
+      error.message.includes("classification_system") ||
+      error.message.includes("classification_category") ||
+      error.message.includes("classification_source") ||
+      error.message.includes("classification_reason") ||
+      error.message.includes("needs_review") ||
+      error.message.includes("user_corrected") ||
+      error.message.includes("updated_at") ||
+      error.message.includes("confidence_score");
+
+    if (!canRetrySchemaFallback) {
+      break;
+    }
+  }
+
+  return { error: lastError || "Bulk BOQ classification update failed.", updatedCount: 0 };
+}
+
 export async function classifyProjectBoqItems(formData: FormData) {
   try {
     return await classifyProjectBoqItemsUnsafe(formData);
@@ -3256,38 +3413,64 @@ export async function bulkCorrectBoqItemClassifications(formData: FormData) {
       supabase,
       userId: user.id,
     });
+    const uniqueChangeSignatures = new Set(
+      changes.map(
+        (change) =>
+          `${change.systemName}::${change.categoryName}::${change.subcategoryName || ""}::${change.needsReview ? "review" : "classified"}`,
+      ),
+    );
     let updatedCount = 0;
     let firstError: string | null = null;
 
-    for (let index = 0; index < itemRows.length; index += 25) {
-      const batch = itemRows.slice(index, index + 25);
-      const results = await Promise.all(
-        batch.map((row) => {
-          const rowIndex = itemRows.findIndex((candidate) => candidate.id === row.id);
-          const classification = classifications[rowIndex];
-          const change = changesById.get(row.id);
-          const systemId = systemIdsByName.get(classification.systemName);
-          const categoryId = systemId ? categoryIdsByKey.get(`${systemId}:${classification.categoryName}`) : undefined;
+    if (uniqueChangeSignatures.size === 1) {
+      const classification = classifications[0];
+      const change = changesById.get(itemRows[0].id);
+      const systemId = systemIdsByName.get(classification.systemName);
+      const categoryId = systemId ? categoryIdsByKey.get(`${systemId}:${classification.categoryName}`) : undefined;
+      const bulkUpdateResult = await bulkUpdateBoqItemsClassification({
+        categoryId,
+        classification,
+        itemIds: itemRows.map((row) => row.id),
+        needsReviewOverride: change?.needsReview ?? false,
+        projectId,
+        supabase,
+        systemId,
+        userId: user.id,
+      });
 
-          return updateBoqItemClassification({
-            categoryId,
-            classification,
-            needsReviewOverride: change?.needsReview ?? false,
-            requireManualPersistence: true,
-            row,
-            supabase,
-            systemId,
-          });
-        }),
-      );
+      updatedCount = bulkUpdateResult.updatedCount;
+      firstError = bulkUpdateResult.error;
+    } else {
+      for (let index = 0; index < itemRows.length; index += 25) {
+        const batch = itemRows.slice(index, index + 25);
+        const results = await Promise.all(
+          batch.map((row) => {
+            const rowIndex = itemRows.findIndex((candidate) => candidate.id === row.id);
+            const classification = classifications[rowIndex];
+            const change = changesById.get(row.id);
+            const systemId = systemIdsByName.get(classification.systemName);
+            const categoryId = systemId ? categoryIdsByKey.get(`${systemId}:${classification.categoryName}`) : undefined;
 
-      for (const updateError of results) {
-        if (updateError) {
-          firstError ||= updateError;
-          continue;
+            return updateBoqItemClassification({
+              categoryId,
+              classification,
+              needsReviewOverride: change?.needsReview ?? false,
+              requireManualPersistence: true,
+              row,
+              supabase,
+              systemId,
+            });
+          }),
+        );
+
+        for (const updateError of results) {
+          if (updateError) {
+            firstError ||= updateError;
+            continue;
+          }
+
+          updatedCount += 1;
         }
-
-        updatedCount += 1;
       }
     }
 
@@ -3321,6 +3504,7 @@ export async function bulkCorrectBoqItemClassifications(formData: FormData) {
 
     revalidatePath(`/projects/${projectId}`);
     revalidatePath(`/projects/${projectId}/intelligence`);
+    revalidatePath(`/projects/${projectId}/manual-review`);
     revalidatePath("/boq");
     revalidatePath("/learning");
 
